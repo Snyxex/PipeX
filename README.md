@@ -2,7 +2,6 @@
 
 > Ein leichtgewichtiges, modulares Daten-Transformations-Framework. Verketten Sie mühelos Kompression, Verschlüsselung und Hashing durch eine einheitliche Stream-basierte Architektur.
 
-[![npm version](https://img.shields.io/npm/v/pipex.svg)](https://www.npmjs.com/package/pipex)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org)
 
