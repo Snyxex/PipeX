@@ -1,0 +1,45 @@
+{
+  "name": "pipex",
+  "version": "0.1.0",
+  "description": "PipeX — A lightweight, modular data transformation engine. Effortlessly chain compression, encryption, and hashing through a unified stream-based architecture.",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "test:comp": "tsx test/compression.test.ts",
+    "test:core": "tsx test/core.test.ts",
+    "test:worker": "tsx test/worker.test.ts",
+    "test:plugin": "tsx test/plugin.test.ts",
+    "test:file": "tsx test/file.test.ts",
+    "build": "tsdown --minify"
+  },
+  "keywords": [
+    "data",
+    "engine",
+    "hashing",
+    "compression",
+    "encryption",
+    "binary",
+    "transformation"
+  ],
+  "author": "Snyxex",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsdown": "^0.21.10",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "msgpackr": "^1.11.9",
+    "zod": "^4.3.6"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  }
+}

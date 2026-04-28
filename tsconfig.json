@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext"],
+    "module": "ESNext",
+    "moduleDetection": "force",
+    
+    /* WICHTIG: Das hat gefehlt! */
+    "moduleResolution": "Bundler",
+    
+    "types": ["node"],
+    "typeRoots": ["node_modules/@types"],
+    
+    "outDir": "./dist",
+    "rootDir": "./",
+
+    /* Schalter für PipeX */
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true, 
+    "noEmit": true,               
+
+    /* Strenge & Qualität */
+    "strict": true,
+    "skipLibCheck": true,        
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,        
+    "noUnusedParameters": true,    
+    "noImplicitOverride": true,    
+    "noPropertyAccessFromIndexSignature": true,
+
+    /* Interop */
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
