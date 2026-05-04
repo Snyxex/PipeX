@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { pipeline } from 'node:stream/promises'; // Nutze die moderne Promise-Version
+import { pipeline } from 'node:stream/promises';ve
 import { Readable, Writable, Transform } from 'node:stream';
 import path from 'node:path';
 import type { ProcessorPlugin, EngineResult, ProcessorContext } from './types.js';
