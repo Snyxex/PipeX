@@ -1,94 +1,104 @@
-import { DataEngine } from '../src/core/core.js';
-import { Buffer } from 'node:buffer';
+/**
+ * examples.ts — illustrates the full PipeX controller API
+ * (Not runnable as-is — requires concrete plugin implementations)
+ */
 
-const log = {
-  success: (msg: string) => console.log(`  \x1b[32m✅ ${msg}\x1b[0m`),
-  error: (msg: string) => console.log(`  \x1b[31m❌ ${msg}\x1b[0m`),
-  info: (msg: string) => console.log(`\n\x1b[36m🔹 ${msg}\x1b[0m`),
-  header: (msg: string) => console.log(`\n\x1b[35m💀 PIPEX BATTLE-TEST (EXTREME CONDITIONS)\x1b[0m\n${'='.repeat(50)}`)
+import { createReadStream, createWriteStream } from 'node:fs';
+import { DataEngine } from '../src/core/core.js';
+import type { ProcessorPlugin, EngineResult }  from '../src/core/types.js';
+
+// ─── Minimal plugin example ───────────────────────────────────────────────────
+
+const uppercasePlugin: ProcessorPlugin = {
+  name:    'uppercase',
+  version: '1.0.0',
+  process: (buf) => Buffer.from(buf.toString().toUpperCase()),
+  reverse: (buf) => Buffer.from(buf.toString().toLowerCase()),
 };
 
-async function runBattleTests() {
-  log.header("STARTING HARDCORE VALIDATION");
-  const engine = new DataEngine();
+// ─── Setup ────────────────────────────────────────────────────────────────────
 
-  // --- TEST 1: Leere & Minimale Werte ---
-  log.info("Test 1: Boundary Values (Empty/Null)");
-  const boundaries = [
-    { label: "Empty String", val: "", type: "string" },
-    { label: "Zero Number", val: 0, type: "number" },
-    { label: "Null Object", val: null, type: "json" },
-    { label: "Empty Array", val: [], type: "json" },
-    { label: "Empty Buffer", val: Buffer.alloc(0), type: "buffer" }
-  ];
+const engine = new DataEngine()
+  .use(uppercasePlugin);
 
-  for (const b of boundaries) {
-    try {
-      const res = await engine.run(b.val);
-      const restored = await engine.undo(res.data, b.type);
-      if (JSON.stringify(restored) === JSON.stringify(b.val) || restored === b.val) {
-        log.success(`${b.label} erfolgreich`);
-      } else {
-        log.error(`${b.label} korrumpiert: ${restored}`);
-      }
-    } catch (e: any) { log.error(`${b.label} Crash: ${e.message}`); }
-  }
+// ─── Events ───────────────────────────────────────────────────────────────────
 
-  // --- TEST 2: Concurrency (Parallel-Verarbeitung) ---
-  log.info("Test 2: High Concurrency (100 parallel runs)");
-  try {
-    const tasks = Array.from({ length: 100 }).map((_, i) => engine.run(`Task-${i}`));
-    const results = await Promise.all(tasks);
-    const undoTasks = results.map((r, i) => engine.undo(r.data, 'string'));
-    const restored = await Promise.all(undoTasks);
-    
-    const allOk = restored.every((val, i) => val === `Task-${i}`);
-    allOk ? log.success("100 parallele Tasks ohne Race-Conditions") : log.error("Datenverlust bei Parallelität!");
-  } catch (e: any) { log.error(`Concurrency Crash: ${e.message}`); }
+engine.on('start',        (id)          => console.log('▶ start', id));
+engine.on('plugin:after', (name, ms)    => console.log(`  ✓ ${name} in ${ms}ms`));
+engine.on('progress',     (bytes, id)   => console.log(`  ~ ${bytes} bytes [${id}]`));
+engine.on('end',          (id, ms)      => console.log(`■ end ${id} (${ms ?? '?'}ms)`));
+engine.on('error',        (err, id)     => console.error(`✗ error [${id}]:`, err.message));
+engine.on('manifest',     (m)           => console.log('manifest:', m));
 
-  // --- TEST 3: Plugin-Manipulation (Gedächtnis-Test) ---
-  log.info("Test 3: Context Metadata Persistence");
-  const metaPlugin = {
-    name: 'meta-test', version: '1.0',
-    process: async (d: Buffer, ctx: any) => {
-      ctx.metadata.secret = "PipeX-Rocks"; // Plugin schreibt in Meta
-      return d;
-    },
-    reverse: async (d: Buffer, ctx: any) => {
-      // Prüfen, ob das undo-Context-Objekt isoliert ist oder Infos braucht
-      return d;
-    }
-  };
-  engine.use(metaPlugin);
-  const metaRes = await engine.run("MetaTest");
-  log.success("Plugin Metadata Handling stabil");
+// ─── engine.binary ────────────────────────────────────────────────────────────
 
-  // --- TEST 4: Extreme JSON (Deep & Wide) ---
-  log.info("Test 4: Heavy Load JSON (Deep Nesting)");
-  const deepObj: any = {};
-  let current = deepObj;
-  for (let i = 0; i < 500; i++) {
-    current.next = { level: i };
-    current = current.next;
-  }
-  try {
-    const res = await engine.run(deepObj);
-    const restored = await engine.undo(res.data, 'json');
-    log.success("500-Level Deep Object erfolgreich transformiert");
-  } catch (e: any) { log.error(`Deep JSON Crash: ${e.message}`); }
+async function binaryExamples() {
+  // Synchronous msgpack round-trip
+  const buf = engine.binary.pack({ id: 1, tags: ['a', 'b'] });
+  const val = engine.binary.unpack<{ id: number; tags: string[] }>(buf);
 
-  // --- TEST 5: Buffer Corruptions (Undo Fail Safety) ---
-  log.info("Test 5: Resiliency against corrupt data");
-  try {
-    const corruptedBuffer = Buffer.from("DEFINITELY_NOT_A_VALID_BUFFER_OR_JSON");
-    await engine.undo(corruptedBuffer, 'json');
-    log.error("Sollte bei korruptem JSON failen, tat es aber nicht");
-  } catch (e: any) {
-    log.success(`Erwarteter Fail bei korrupten Daten: ${e.message}`);
-  }
+  // Plugin pipeline
+  const result: EngineResult = await engine.binary.run({ hello: 'world' });
+  const original = await engine.binary.undo(result);     // ← uses result.originalType
+  
+  // External buffer with forced type
+  const restored = await engine.binary.undo<string>(result.data, 'json');
 
-  console.log(`\n${'='.repeat(50)}`);
-  console.log("🏆 PIPEX CORE IS BATTLE-HARDENED!\n");
+  // Embed manifest in binary for transport
+  const withManifest = engine.binary.packWithManifest({ payload: 'data' });
+  const { manifest, data } = engine.binary.unpackWithManifest(withManifest);
+  console.log('transported manifest:', manifest.plugins);
 }
 
-runBattleTests().catch(console.error);
+// ─── engine.file ──────────────────────────────────────────────────────────────
+
+async function fileExamples() {
+  // Forward through plugin chain
+  await engine.file.process('input.txt', 'output.bin');
+
+  // Reverse through plugin chain
+  await engine.file.reverse('output.bin', 'restored.txt');
+
+  // Pack to msgpack with manifest header
+  await engine.file.pack('data.json', 'data.msgpack');
+
+  // Unpack msgpack → NDJSON (manifest is emitted as an event)
+  await engine.file.unpack('data.msgpack', 'data.ndjson');
+
+  // Path containment — safe directory boundary
+  await engine.file.process('uploads/file.txt', 'out/result.bin', '/var/app/uploads');
+}
+
+// ─── engine.stream ────────────────────────────────────────────────────────────
+
+async function streamExamples() {
+  // Pipe a Readable through plugins into a Writable
+  await engine.stream.pipe(
+    createReadStream('input.bin'),
+    createWriteStream('output.bin'),
+  );
+
+  // Reverse pipeline
+  await engine.stream.pipe(
+    createReadStream('output.bin'),
+    createWriteStream('restored.bin'),
+    true, // reverse=true
+  );
+
+  // Streaming endpoint — pipe any Readable into it
+  const dest = createWriteStream('live-output.bin');
+  const sink = engine.stream.into(dest);
+  createReadStream('large-input.bin').pipe(sink);
+
+  // Object stream → msgpack with manifest
+  const { Readable } = await import('node:stream');
+  const objects = Readable.from([{ id: 1 }, { id: 2 }, { id: 3 }]);
+  objects
+    .pipe(engine.stream.pack())
+    .pipe(createWriteStream('packed.msgpack'));
+
+  // msgpack bytes → decoded objects with manifest event
+  createReadStream('packed.msgpack')
+    .pipe(engine.stream.unpack())
+    .on('data', (obj: unknown) => console.log('decoded:', obj));
+}

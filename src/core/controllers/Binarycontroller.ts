@@ -1,0 +1,162 @@
+/**
+ * BinaryController — in-memory binary operations
+ *
+ * engine.binary.pack(data)     → Buffer (msgpack)
+ * engine.binary.unpack(buf)    → T
+ * engine.binary.run(input)     → EngineResult  (plugin pipeline)
+ * engine.binary.undo(result)   → T             (round-trip, self-healing)
+ */
+
+import type { DataEngine }     from '../dataEngine.js';
+import {
+  PACKR,
+  UNPACKR,
+  detectType,
+  toBuffer,
+  fromBuffer,
+  makeContext,
+  buildManifest,
+  isManifest,
+} from '../core.js';
+import type { EngineResult, PipeXManifest } from '../types.js';
+
+export class BinaryController {
+  readonly #engine: DataEngine;
+
+  constructor(engine: DataEngine) {
+    this.#engine = engine;
+  }
+
+  /**
+   * Serialise any JS value to a msgpack Buffer (synchronous, zero-copy).
+   * For streaming large datasets use engine.stream or engine.file.pack instead.
+   */
+  pack(data: unknown): Buffer {
+    try {
+      return PACKR.pack(data) as Buffer;
+    } catch (err: unknown) {
+      throw new Error(`[PipeX] binary.pack failed: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Deserialise a msgpack Buffer back to T (synchronous).
+   */
+  unpack<T = unknown>(input: Buffer | Uint8Array): T {
+    try {
+      return UNPACKR.unpack(input as Buffer) as T;
+    } catch (err: unknown) {
+      throw new Error(`[PipeX] binary.unpack failed: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Run input through the full plugin pipeline.
+   * Returns an EngineResult that carries originalType so undo() can round-trip.
+   */
+  async run(input: unknown): Promise<EngineResult> {
+    const requestId    = this.#engine.startRequest();
+    const startTime    = Date.now();
+    const originalType = detectType(input);
+
+    let data = toBuffer(input);
+    const ctx     = makeContext(requestId, { originalType });
+    const metrics: Record<string, number> = {};
+
+    try {
+      for (const plugin of this.#engine.plugins) {
+        const t0  = Date.now();
+        data      = await plugin.process(data, ctx);
+        const dur = Date.now() - t0;
+        metrics[plugin.name] = dur;
+        this.#engine.emit('plugin:after', plugin.name, dur);
+      }
+    } catch (err: unknown) {
+      this.#engine.emitError(err, requestId);
+      throw err;
+    }
+
+    this.#engine.endRequest(requestId, Date.now() - startTime);
+
+    return {
+      data,
+      originalType,
+      pipeline: this.#engine.plugins.map(p => `${p.name}@${p.version}`),
+      metrics:  { durationMs: Date.now() - startTime, steps: metrics },
+    };
+  }
+
+  /**
+   * Reverse the plugin pipeline for a previously processed EngineResult.
+   *
+   * Self-healing: if the result carries a manifest (written by file.pack),
+   * the plugin chain is read from it — no manual forceType needed.
+   *
+   * Overload 1: undo(result)               — uses result.originalType
+   * Overload 2: undo(buffer, forceType)    — for externally produced buffers
+   */
+  async undo<T = unknown>(result: EngineResult): Promise<T>;
+  async undo<T = unknown>(input: Buffer, forceType: string): Promise<T>;
+  async undo<T = unknown>(
+    inputOrResult: Buffer | EngineResult,
+    forceType?: string,
+  ): Promise<T> {
+    const isResult   = !Buffer.isBuffer(inputOrResult);
+    let   data       = isResult ? (inputOrResult as EngineResult).data : (inputOrResult as Buffer);
+    const origType   = isResult
+      ? (inputOrResult as EngineResult).originalType
+      : (forceType as string);
+
+    const requestId  = this.#engine.startRequest();
+    const ctx        = makeContext(requestId, { originalType: origType });
+
+    try {
+      for (const plugin of [...this.#engine.plugins].reverse()) {
+        if (typeof plugin.reverse !== 'function') continue;
+        data = await plugin.reverse(data, ctx);
+        this.#engine.emit('plugin:after', plugin.name, 0);
+      }
+    } catch (err: unknown) {
+      this.#engine.emitError(err, requestId);
+      throw err;
+    }
+
+    this.#engine.endRequest(requestId);
+    return fromBuffer(data, origType) as T;
+  }
+
+  /**
+   * Pack data AND embed a manifest header as the first msgpack frame.
+   * Mirrors what file.pack writes to disk — useful for in-memory transport.
+   */
+  packWithManifest(data: unknown): Buffer {
+    const manifest = buildManifest(this.#engine.plugins);
+    const mFrame   = PACKR.pack(manifest) as Buffer;
+    const dFrame   = PACKR.pack(data)    as Buffer;
+    return Buffer.concat([mFrame, dFrame]);
+  }
+
+  /**
+   * Unpack a buffer that begins with a PipeXManifest frame.
+   * Returns { manifest, data } — callers can inspect the manifest to verify
+   * the pipeline that produced the buffer before consuming data.
+   */
+  unpackWithManifest<T = unknown>(input: Buffer): { manifest: PipeXManifest; data: T } {
+    // Decode all frames — first must be the manifest
+    const frames: unknown[] = [];
+    let   offset = 0;
+    while (offset < input.length) {
+      const value = UNPACKR.unpack(input.subarray(offset)) as unknown;
+      frames.push(value);
+      // Advance by the byte length of the packed value
+      offset += (PACKR.pack(value) as Buffer).length;
+    }
+    if (frames.length < 2) {
+      throw new Error('[PipeX] binary.unpackWithManifest: buffer contains fewer than 2 frames');
+    }
+    if (!isManifest(frames[0])) {
+      throw new Error('[PipeX] binary.unpackWithManifest: first frame is not a PipeXManifest');
+    }
+    return { manifest: frames[0], data: frames[1] as T };
+  }
+}
