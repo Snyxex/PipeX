@@ -11,8 +11,23 @@ export type {
 export { isManifest }        from './core/types.js';
 
 export { BasePlugin } from './core/plugin.js';
-export { HashingPlugin } from './plugin/hashing.js';
-export { EncryptionPlugin } from './plugin/encryption.js';
-export { CompressionPlugin } from './plugin/compression.js';
-export { BenchmarkPlugin } from './plugin/performance.js';
-export { WorkerPoolPlugin } from './plugin/worker.js';
+
+// --- Standard Plugin Library ---
+import { HashingPlugin } from './plugin/hashing.js';
+import { EncryptionPlugin } from './plugin/encryption.js';
+import { CompressionPlugin } from './plugin/compression.js';
+import { BenchmarkPlugin } from './plugin/performance.js';
+import { WorkerPoolPlugin } from './plugin/worker.js';
+import { ValidationPlugin } from './core/validation.js';
+
+export const Plugins = {
+  Hashing: HashingPlugin,
+  Encryption: EncryptionPlugin,
+  Compression: CompressionPlugin,
+  Benchmark: BenchmarkPlugin,
+  WorkerPool: WorkerPoolPlugin,
+  Validation: ValidationPlugin,
+} as const;
+
+// Also export individually for those who prefer it
+export { HashingPlugin, EncryptionPlugin, CompressionPlugin, BenchmarkPlugin, WorkerPoolPlugin, ValidationPlugin };

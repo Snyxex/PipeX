@@ -1,111 +1,103 @@
-# PipeX
+# PipeX 🚀
 
-> Ein leichtgewichtiges, modulares Daten-Transformations-Framework. Verketten Sie mühelos Kompression, Verschlüsselung und Hashing durch eine einheitliche Stream-basierte Architektur.
+**PipeX** is a high-performance, modular data transformation engine for TypeScript. It allows you to effortlessly chain compression, encryption, hashing, and validation through a unified, stream-aware architecture.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org)
-
-## Features
-
-- **Plugin-Architektur** – Modular erweiterbar durch eigene Plugins
-- **Stream-basiert** – Effiziente Verarbeitung großer Datenmengen ohne Speicherprobleme
-- **Integrierte Plugins** – Kompression, Verschlüsselung, Hashing, Performance-Messung
-- **Worker-Pool** – Parallele Verarbeitung für maximale Performance
-- **Undo-Funktion** – Pipeline rückgängig machen mit `undo()`
-- **Typ-sicher** – Vollständige TypeScript-Unterstützung
-
-
-## Schnellstart
-
-```typescript
-import { DataEngine, CompressionPlugin, EncryptionPlugin, HashingPlugin } from 'pipex';
-
-const engine = new DataEngine()
-  .use(new CompressionPlugin({ type: 'gzip', level: 6 }))
-  .use(new EncryptionPlugin({ type: 'aes-256-gcm', key: Buffer.from(process.env.KEY!) }))
-  .use(new HashingPlugin({ algorithm: 'sha256', secret: 'my-secret-key' }));
-
-// Daten verarbeiten
-const result = await engine.run(inputData);
-
-// Pipeline rückgängig machen
-const original = await engine.undo(result.data);
-```
-
-## Plugins
-
-| Plugin | Beschreibung | Optionen |
-|--------|--------------|----------|
-| `CompressionPlugin` | Gzip oder Brotli Kompression | `type: 'gzip' \| 'brotli'`, `level: 1-9` |
-| `EncryptionPlugin` | AES-256-GCM oder ChaCha20-Poly1305 | `type: 'aes-256-gcm' \| 'chacha20-poly1305'`, `key: Buffer` |
-| `HashingPlugin` | SHA256 oder SHA512 HMAC | `algorithm: 'sha256' \| 'sha512'`, `secret: string` |
-| `BenchmarkPlugin` | Performance-Messung | – |
-| `WorkerPoolPlugin` | Parallele Worker-Verarbeitung | `workers: number` |
-
-## API
-
-### DataEngine
-
-```typescript
-class DataEngine {
-  use(plugin: ProcessorPlugin): this;  // Plugin zur Pipeline hinzufügen
-  run(input: any): Promise<EngineResult>;  // Pipeline ausführen
-  undo<T>(input: Buffer, forceType?: string): Promise<T>;  // Pipeline rückgängig
-}
-```
-
-### EngineResult
-
-```typescript
-interface EngineResult {
-  data: Buffer;                    // Verarbeitete Daten
-  pipeline: string[];              // Verwendete Plugins
-  metrics: {
-    durationMs: number;           // Gesamtdauer in ms
-    steps: Record<string, number>; // Dauer pro Plugin
-  };
-}
-```
-
-## Beispiel: Datei verarbeiten
-
-```typescript
-import { DataEngine, CompressionPlugin, EncryptionPlugin } from 'pipex';
-import { readFileSync, writeFileSync } from 'fs';
-
-const input = readFileSync('large-file.dat');
-const key = Buffer.from('your-32-byte-secret-key-here!');
-
-const engine = new DataEngine()
-  .use(new CompressionPlugin({ type: 'brotli', level: 9 }))
-  .use(new EncryptionPlugin({ type: 'aes-256-gcm', key }));
-
-const result = await engine.run(input);
-
-writeFileSync('output.dat', result.data);
-console.log(`Verarbeitet in ${result.metrics.durationMs}ms`);
-```
-
-## Entwicklung
-
-```bash
-# Tests ausführen
-npm run test:core
-npm run test:plugin
-npm run test:compression
-
-# Build erstellen
-npm run build
-```
-
-## Anforderungen
-
-- Node.js ≥ 20.0.0
-
-## Lizenz
-
-MIT – [LICENSE](LICENSE)
+Unlike simple pipe utilities, PipeX is a **Data Highway** that ensures your data is secure, compact, and self-describing.
 
 ---
 
-Erstellt von [Snyxex](https://github.com/Snyxex)
+## ✨ Key Features
+
+- **Standard Plugin Library:** Built-in support for Gzip, Brotli, AES-256-GCM, HMAC, and more.
+- **Always-on Validation:** Integrated Zod support for schema-driven data integrity.
+- **Manifest System:** Every packed package is self-describing, allowing for "self-healing" decompression/decryption.
+- **Multi-Controller API:** Specialized interfaces for **File**, **Binary** (In-Memory), and **Live Streams**.
+- **High Performance:** Powered by `msgpackr` for binary serialization and Node.js native streams.
+- **Worker Support:** Offload heavy CPU tasks to a persistent worker pool with one line of code.
+
+---
+
+## 📦 Installation
+
+```bash
+npm install pipex zod
+```
+
+---
+
+## 🚀 Quick Start
+
+```typescript
+import { DataEngine, Plugins } from 'pipex';
+import { z } from 'zod';
+
+// 1. Define your data schema
+const UserSchema = z.object({
+  id: z.number(),
+  username: z.string()
+});
+
+// 2. Setup the Engine
+const engine = new DataEngine()
+  .setSchema(UserSchema)
+  .use(new Plugins.Compression({ type: 'brotli' }))
+  .use(new Plugins.Encryption({ algorithm: 'aes-256-gcm', key: Buffer.from('...') }));
+
+// 3. Transform Data
+// Binary (In-Memory)
+const result = await engine.binary.run({ id: 1, username: 'dev' });
+
+// File (Zero-RAM streaming)
+await engine.file.process('input.json', 'output.pipex');
+
+// 4. Restore Data
+const original = await engine.binary.undo(result);
+```
+
+---
+
+## 🛠️ Controllers
+
+PipeX is organized into three specialized controllers:
+
+### 💾 Binary Controller
+Ideal for small-to-medium datasets that fit in memory.
+- `engine.binary.run(data)`: Execute the full pipeline.
+- `engine.binary.undo(result)`: Reverse the pipeline.
+- `engine.binary.pack(data)`: Fast MsgPack serialization.
+
+### 📂 File Controller
+Designed for massive files with zero memory overhead.
+- `engine.file.process(src, dst)`: Stream data through the pipeline to a file.
+- `engine.file.pack(src, dst)`: Pack a file with a PipeX Manifest header.
+
+### 🌊 Stream Controller
+Low-level primitives for live data streams (TCP, WebSockets, etc.).
+- `engine.stream.into(writable)`: Create a writable entry point to your pipeline.
+- `engine.stream.pipe(readable, writable)`: Manually orchestrate a flow.
+
+---
+
+## 🔌 Standard Plugins
+
+| Plugin | Description | Supported Modes |
+| :--- | :--- | :--- |
+| `Compression` | Gzip & Brotli compression | Buffer & Stream |
+| `Encryption` | AES-256-GCM & ChaCha20 | Buffer & Stream |
+| `Hashing` | HMAC-SHA256/512 Integrity | Buffer & Stream |
+| `Validation` | Zod Schema enforcement | Buffer |
+| `WorkerPool` | Multi-threaded XOR/Processing | Buffer & Stream |
+| `Benchmark` | Metrics and byte counting | Buffer |
+
+---
+
+## 📖 Deep Dives
+
+- [Architecture Guide](./docs/architecture.md)
+- [Validation System](./docs/validation.md)
+
+---
+
+## 📄 License
+
+MIT © [Snyxex](https://github.com/Snyxex)

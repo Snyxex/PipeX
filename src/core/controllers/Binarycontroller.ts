@@ -15,6 +15,7 @@ import {
   toBuffer,
   fromBuffer,
   makeContext,
+  withRetry,
   buildManifest,
   isManifest,
 } from '../core.js';
@@ -55,34 +56,69 @@ export class BinaryController {
    * Returns an EngineResult that carries originalType so undo() can round-trip.
    */
   async run(input: unknown): Promise<EngineResult> {
-    const requestId    = this.#engine.startRequest();
+    const requestId    = this.#engine.startRequest({ operation: 'run' });
     const startTime    = Date.now();
     const originalType = detectType(input);
 
+    const span = this.#engine.tracer?.startSpan('binary:run', { requestId } as any);
+    span?.setAttribute('input.type', originalType);
+
+    // Core Input Validation
+    try {
+      this.#engine.validate(input);
+    } catch (err: unknown) {
+      this.#engine.emitError(err, requestId);
+      span?.setAttribute('error', true);
+      span?.end();
+      throw err;
+    }
+
     let data = toBuffer(input);
-    const ctx     = makeContext(requestId, { originalType });
     const metrics: Record<string, number> = {};
 
     try {
       for (const plugin of this.#engine.plugins) {
         const t0  = Date.now();
-        data      = await plugin.process(data, ctx);
+        const pSpan = this.#engine.tracer?.startSpan(`plugin:${plugin.name}`, { requestId } as any);
+        pSpan?.setAttribute('mode', 'process');
+        
+        try {
+          const ctx = makeContext(requestId, { originalType }, this.#engine.logger, pSpan);
+          data = await withRetry(() => plugin.process(data, ctx), plugin.retryOptions, this.#engine.logger);
+        } catch (e) {
+          pSpan?.setAttribute('error', true);
+          throw e;
+        } finally {
+          pSpan?.end();
+        }
+
         const dur = Date.now() - t0;
         metrics[plugin.name] = dur;
         this.#engine.emit('plugin:after', plugin.name, dur);
       }
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
+      span?.setAttribute('error', true);
+      span?.end();
       throw err;
     }
 
-    this.#engine.endRequest(requestId, Date.now() - startTime);
+    const durationMs = Date.now() - startTime;
+    this.#engine.endRequest(requestId, durationMs);
+    span?.setAttribute('duration_ms', durationMs);
+    span?.end();
+
+    await this.#engine.emitAudit({
+      requestId,
+      operation: 'process',
+      metadata: { inputType: originalType, durationMs },
+    });
 
     return {
       data,
       originalType,
       pipeline: this.#engine.plugins.map(p => `${p.name}@${p.version}`),
-      metrics:  { durationMs: Date.now() - startTime, steps: metrics },
+      metrics:  { durationMs, steps: metrics },
     };
   }
 
@@ -107,22 +143,77 @@ export class BinaryController {
       ? (inputOrResult as EngineResult).originalType
       : (forceType as string);
 
-    const requestId  = this.#engine.startRequest();
-    const ctx        = makeContext(requestId, { originalType: origType });
+    const requestId  = this.#engine.startRequest({ operation: 'undo', originalType: origType });
+    const span = this.#engine.tracer?.startSpan('binary:undo', { requestId } as any);
+
+    // If it looks like a manifest-prepended buffer, extract it for validation
+    if (Buffer.isBuffer(inputOrResult) && inputOrResult.length > 0) {
+      try {
+        const { manifest, data: actualData } = this.unpackWithManifest(inputOrResult);
+        data = actualData as Buffer;
+        
+        // Validation: Warn if the current engine's plugin list doesn't match the manifest
+        const currentPipeline = this.#engine.plugins.map(p => `${p.name}@${p.version}`);
+        const manifestPipeline = manifest.plugins;
+        
+        if (JSON.stringify(currentPipeline) !== JSON.stringify(manifestPipeline)) {
+          const warnMsg = `[PipeX] Manifest mismatch: Engine has [${currentPipeline}], buffer was packed with [${manifestPipeline}]`;
+          this.#engine.logger?.warn(warnMsg, { requestId });
+          console.warn(warnMsg);
+        }
+      } catch {
+        // Not a manifest buffer, continue with raw input
+      }
+    }
 
     try {
       for (const plugin of [...this.#engine.plugins].reverse()) {
         if (typeof plugin.reverse !== 'function') continue;
-        data = await plugin.reverse(data, ctx);
+        
+        const pSpan = this.#engine.tracer?.startSpan(`plugin:${plugin.name}`, { requestId } as any);
+        pSpan?.setAttribute('mode', 'reverse');
+        
+        try {
+          const ctx = makeContext(requestId, { originalType: origType }, this.#engine.logger, pSpan);
+          data = await withRetry(() => plugin.reverse!(data, ctx), plugin.retryOptions, this.#engine.logger);
+        } catch (e) {
+          pSpan?.setAttribute('error', true);
+          throw e;
+        } finally {
+          pSpan?.end();
+        }
+        
         this.#engine.emit('plugin:after', plugin.name, 0);
       }
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
+      span?.setAttribute('error', true);
+      span?.end();
+      throw err;
+    }
+
+    const restored = fromBuffer(data, origType) as T;
+
+    // Core Output Validation
+    try {
+      this.#engine.validate(restored);
+    } catch (err: unknown) {
+      this.#engine.emitError(err, requestId);
+      span?.setAttribute('error', true);
+      span?.end();
       throw err;
     }
 
     this.#engine.endRequest(requestId);
-    return fromBuffer(data, origType) as T;
+    span?.end();
+
+    await this.#engine.emitAudit({
+      requestId,
+      operation: 'reverse',
+      metadata: { originalType: origType },
+    });
+    
+    return restored;
   }
 
   /**
@@ -131,8 +222,8 @@ export class BinaryController {
    */
   packWithManifest(data: unknown): Buffer {
     const manifest = buildManifest(this.#engine.plugins);
-    const mFrame   = PACKR.pack(manifest) as Buffer;
-    const dFrame   = PACKR.pack(data)    as Buffer;
+    const mFrame   = PACKR.pack(manifest);
+    const dFrame   = PACKR.pack(data);
     return Buffer.concat([mFrame, dFrame]);
   }
 
@@ -142,15 +233,15 @@ export class BinaryController {
    * the pipeline that produced the buffer before consuming data.
    */
   unpackWithManifest<T = unknown>(input: Buffer): { manifest: PipeXManifest; data: T } {
-    // Decode all frames — first must be the manifest
     const frames: unknown[] = [];
-    let   offset = 0;
-    while (offset < input.length) {
-      const value = UNPACKR.unpack(input.subarray(offset)) as unknown;
-      frames.push(value);
-      // Advance by the byte length of the packed value
-      offset += (PACKR.pack(value) as Buffer).length;
+    try {
+      UNPACKR.unpackMultiple(input, (value) => {
+        frames.push(value);
+      });
+    } catch (err: unknown) {
+      throw new Error(`[PipeX] binary.unpackWithManifest: failed to decode frames — ${(err as Error).message}`);
     }
+
     if (frames.length < 2) {
       throw new Error('[PipeX] binary.unpackWithManifest: buffer contains fewer than 2 frames');
     }

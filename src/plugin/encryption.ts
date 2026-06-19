@@ -4,204 +4,136 @@ import {
   randomBytes 
 } from 'node:crypto';
 import type { CipherGCM, DecipherGCM } from 'node:crypto';
-import { Transform } from 'node:stream';
+import { Transform, type TransformCallback } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
 import type { ProcessorContext } from '../core/types.js';
 
-export type EncryptionType = 'aes-256-gcm' | 'chacha20-poly1305';
+export type EncryptionAlgorithm = 'aes-256-gcm' | 'chacha20-poly1305';
 
-// Packet layout (buffer mode):
-// [1 byte type][12 bytes IV][16 bytes auth-tag][N bytes ciphertext]
-const HEADER_BYTES  = 1;
-const IV_BYTES      = 12;
-const TAG_BYTES     = 16;
-const PREFIX_BYTES  = HEADER_BYTES + IV_BYTES + TAG_BYTES; // 29 total
-
-interface EncryptionOptions {
-  type: EncryptionType;
+export interface EncryptionOptions {
+  algorithm: EncryptionAlgorithm;
   key: Buffer;
 }
 
+const ALGO_MAP: Record<EncryptionAlgorithm, number> = {
+  'aes-256-gcm': 1,
+  'chacha20-poly1305': 2,
+};
+
+const ID_TO_ALGO: Record<number, EncryptionAlgorithm> = {
+  1: 'aes-256-gcm',
+  2: 'chacha20-poly1305',
+};
+
+const IV_LENGTH = 12;
+const TAG_LENGTH = 16;
+const HEADER_LENGTH = 1 + IV_LENGTH + TAG_LENGTH; // [algo][iv][tag]
+
+/**
+ * EncryptionPlugin — Standard library plugin for AES-GCM and ChaCha20-Poly1305.
+ * Uses a combined header: [1B algo][12B IV][16B AuthTag]
+ */
 export class EncryptionPlugin extends BasePlugin {
-  public readonly name = 'encryption-provider';
-  public readonly version = '2.1.2';
-
-  private readonly typeMap: Record<EncryptionType, number> = {
-    'aes-256-gcm': 1,
-    'chacha20-poly1305': 2
-  };
-
-
-  private readonly idToAlgo: Record<number, EncryptionType> = {
-    1: 'aes-256-gcm',
-    2: 'chacha20-poly1305'
-  };
+  public readonly name = 'encryption';
+  public readonly version = '3.0.0';
 
   constructor(protected override options: EncryptionOptions) {
     super(options);
     if (options.key.length !== 32) {
-      throw new Error(`[${this.name}] Key must be exactly 32 bytes, got ${options.key.length}.`);
+      throw new Error('[PipeX] Encryption: Key must be 32 bytes');
     }
   }
 
-  public override async process(data: Buffer, _context: ProcessorContext): Promise<Buffer> {
-    const iv = randomBytes(IV_BYTES);
-    const cipher = createCipheriv(
-      this.options.type, this.options.key, iv,
-      { authTagLength: TAG_BYTES } as any
-    ) as CipherGCM;
-
+  public override async process(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
+    const { algorithm, key } = this.options;
+    const iv = randomBytes(IV_LENGTH);
+    const cipher = createCipheriv(algorithm, key, iv, { authTagLength: TAG_LENGTH } as any) as CipherGCM;
+    
     const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
     const tag = cipher.getAuthTag();
-
-
-    const header = Buffer.allocUnsafe(HEADER_BYTES);
-    header.writeUInt8(this.typeMap[this.options.type]);
+    const header = Buffer.allocUnsafe(1);
+    header.writeUInt8(ALGO_MAP[algorithm]);
 
     return Buffer.concat([header, iv, tag, encrypted]);
   }
 
-  public override async reverse(data: Buffer, _context: ProcessorContext): Promise<Buffer> {
-    
-    if (data.length < PREFIX_BYTES) {
-      throw new Error(
-        `[${this.name}] Decryption failed: packet too short ` +
-        `(${data.length} bytes, minimum is ${PREFIX_BYTES}).`
-      );
-    }
+  public override async reverse(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
+    if (data.length < HEADER_LENGTH) throw new Error('[PipeX] Decryption failed: packet too short');
 
-    try {
-      const typeId       = data.readUInt8(0);
-      const iv           = data.subarray(HEADER_BYTES, HEADER_BYTES + IV_BYTES);
-      const tag          = data.subarray(HEADER_BYTES + IV_BYTES, PREFIX_BYTES);
-      const encryptedData = data.subarray(PREFIX_BYTES);
+    const algoId = data.readUInt8(0);
+    const algo = ID_TO_ALGO[algoId];
+    const iv = data.subarray(1, 1 + IV_LENGTH);
+    const tag = data.subarray(1 + IV_LENGTH, HEADER_LENGTH);
+    const ciphertext = data.subarray(HEADER_LENGTH);
 
-      
-      const algo = this.idToAlgo[typeId];
-      if (!algo) {
-        throw new Error(`Unknown encryption type byte: ${typeId}`);
-      }
+    const decipher = createDecipheriv(algo, this.options.key, iv, { authTagLength: TAG_LENGTH } as any) as DecipherGCM;
+    decipher.setAuthTag(tag);
 
-      const decipher = createDecipheriv(
-        algo, this.options.key, iv,
-        { authTagLength: TAG_BYTES } as any
-      ) as DecipherGCM;
-
-      decipher.setAuthTag(tag);
-
-      return Buffer.concat([
-        decipher.update(encryptedData),
-        decipher.final()
-      ]);
-    } catch (error: any) {
-
-      if (error.message.startsWith(`[${this.name}]`)) throw error;
-
-      throw new Error(
-        `[${this.name}] Decryption failed: invalid key, altered data, or corrupted auth tag.`
-      );
-    }
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   }
 
- 
- 
   public createStream(mode: 'compress' | 'decompress'): Transform {
-    return mode === 'compress'
-      ? this._createEncryptStream()
-      : this._createDecryptStream();
-  }
+    const { algorithm, key } = this.options;
 
-  private _createEncryptStream(): Transform {
-    const { type, key } = this.options;
-    const typeId = this.typeMap[type];
-    const iv = randomBytes(IV_BYTES);
- 
-    const cipher = createCipheriv(type, key, iv, { authTagLength: TAG_BYTES } as any) as CipherGCM;
-    const chunks: Buffer[] = [];
+    if (mode === 'compress') {
+      const iv = randomBytes(IV_LENGTH);
+      const cipher = createCipheriv(algorithm, key, iv, { authTagLength: TAG_LENGTH } as any) as CipherGCM;
+      let headerSent = false;
+      const dataChunks: Buffer[] = [];
 
-    return new Transform({
-      transform(chunk: Buffer, _encoding, callback) {
-        try {
-          chunks.push(cipher.update(chunk));
-          callback();
-        } catch (err) {
-          callback(err as Error);
-        }
-      },
-      flush(callback) {
-        try {
-          const finalChunk = cipher.final();
-          if (finalChunk.length) chunks.push(finalChunk);
+      return new Transform({
+        transform(chunk: Buffer, _enc, cb) {
+          dataChunks.push(cipher.update(chunk));
+          cb();
+        },
+        flush(cb) {
+          dataChunks.push(cipher.final());
           const tag = cipher.getAuthTag();
-
-      
-          const header = Buffer.allocUnsafe(HEADER_BYTES + IV_BYTES);
-          header.writeUInt8(typeId, 0);
-          iv.copy(header, HEADER_BYTES);
-          this.push(Buffer.concat([header, tag, ...chunks]));
-          callback();
-        } catch (err) {
-          callback(err as Error);
+          
+          const head = Buffer.allocUnsafe(1);
+          head.writeUInt8(ALGO_MAP[algorithm]);
+          
+          this.push(Buffer.concat([head, iv, tag, ...dataChunks]));
+          cb();
         }
-      }
-    });
-  }
+      });
+    } else {
+      // Decompress (Decrypt)
+      let headBuf = Buffer.alloc(0);
+      let decipher: DecipherGCM | null = null;
 
-  private _createDecryptStream(): Transform {
-    const { key } = this.options;
-    const idToAlgo = this.idToAlgo;
-    const name = this.name;
-
-  
-    let headerBuf = Buffer.alloc(0);
-    let headerParsed = false;
-    let decipher: DecipherGCM | null = null;
-
-    return new Transform({
-      transform(chunk: Buffer, _encoding, callback) {
-        try {
-          if (!headerParsed) {
-            headerBuf = Buffer.concat([headerBuf, chunk]);
-            if (headerBuf.length < PREFIX_BYTES) {
-              callback(); 
-              return;
-            }
-            const typeId = headerBuf.readUInt8(0);
-            const algo = idToAlgo[typeId];
-            if (!algo) {
-              callback(new Error(`[${name}] Unknown stream type byte: ${typeId}`));
-              return;
-            }
-            const iv  = headerBuf.subarray(HEADER_BYTES, HEADER_BYTES + IV_BYTES);
-            const tag = headerBuf.subarray(HEADER_BYTES + IV_BYTES, PREFIX_BYTES);
-            decipher = createDecipheriv(algo, key, iv, { authTagLength: TAG_BYTES } as any) as DecipherGCM;
-            
-            decipher.setAuthTag(tag);
-            headerParsed = true;
-   
-            const rest = headerBuf.subarray(PREFIX_BYTES);
-            if (rest.length) this.push(decipher.update(rest));
-          } else {
-            this.push(decipher!.update(chunk));
-          }
-          callback();
-        } catch (err) {
-          callback(err as Error);
-        }
-      },
-      flush(callback) {
-        try {
+      return new Transform({
+        transform(chunk: Buffer, _enc, cb) {
           if (!decipher) {
-            callback(new Error(`[${name}] Stream decryption failed: packet too short.`));
-            return;
+            headBuf = Buffer.concat([headBuf, chunk]);
+            if (headBuf.length >= HEADER_LENGTH) {
+              const algoId = headBuf.readUInt8(0);
+              const algo = ID_TO_ALGO[algoId];
+              const iv = headBuf.subarray(1, 1 + IV_LENGTH);
+              const tag = headBuf.subarray(1 + IV_LENGTH, HEADER_LENGTH);
+              
+              decipher = createDecipheriv(algo, key, iv, { authTagLength: TAG_LENGTH } as any) as DecipherGCM;
+              decipher.setAuthTag(tag);
+              
+              const rest = headBuf.subarray(HEADER_LENGTH);
+              if (rest.length > 0) this.push(decipher.update(rest));
+              headBuf = Buffer.alloc(0);
+            }
+          } else {
+            this.push(decipher.update(chunk));
           }
-          const finalChunk = decipher.final(); 
-          if (finalChunk.length) this.push(finalChunk);
-          callback();
-        } catch (err) {
-          callback(new Error(`[${name}] Stream decryption failed: invalid key or corrupted stream.`));
+          cb();
+        },
+        flush(cb: TransformCallback) {
+          if (!decipher) return cb(new Error('[PipeX] Stream decryption failed: No header'));
+          try {
+            this.push(decipher.final());
+            cb();
+          } catch (e) {
+            cb(e as Error);
+          }
         }
-      }
-    });
+      });
+    }
   }
 }

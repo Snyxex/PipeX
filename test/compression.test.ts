@@ -22,11 +22,11 @@ async function runTest() {
   try {
     
     console.log("🗜️  Komprimiere Datei...");
-    await engine.processFile(originalFile, compressedFile);
+    await engine.file.process(originalFile, compressedFile);
 
   
     console.log("🔓 Dekomprimiere Datei...");
-    await engine.reverseFile(compressedFile, restoredFile);
+    await engine.file.reverse(compressedFile, restoredFile);
 
    
     const original = readFileSync(originalFile, 'utf-8');

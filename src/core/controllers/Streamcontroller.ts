@@ -41,11 +41,17 @@ export class StreamController {
     const transforms = buildTransformChain(
       this.#engine.plugins, 'compress', false,
       bytes => this.#engine.emitProgress(bytes, requestId),
+      this.#engine.logger,
+      this.#engine.tracer,
+      this.#engine.dlq,
     );
     const entry = new PassThrough();
     runPipeline(entry, transforms, destination)
       .then(() => this.#engine.endRequest(requestId))
-      .catch(err => this.#engine.emitError(err, requestId));
+      .catch(err => {
+        this.#engine.emitError(err, requestId);
+        entry.destroy(err instanceof Error ? err : new Error(String(err)));
+      });
     return entry;
   }
 
@@ -61,11 +67,17 @@ export class StreamController {
     const transforms = buildTransformChain(
       this.#engine.plugins, 'decompress', true,
       bytes => this.#engine.emitProgress(bytes, requestId),
+      this.#engine.logger,
+      this.#engine.tracer,
+      this.#engine.dlq,
     );
     const entry = new PassThrough();
     runPipeline(entry, transforms, destination)
       .then(() => this.#engine.endRequest(requestId))
-      .catch(err => this.#engine.emitError(err, requestId));
+      .catch(err => {
+        this.#engine.emitError(err, requestId);
+        entry.destroy(err instanceof Error ? err : new Error(String(err)));
+      });
     return entry;
   }
 
@@ -117,6 +129,9 @@ export class StreamController {
     const transforms = buildTransformChain(
       this.#engine.plugins, mode, reverse,
       bytes => this.#engine.emitProgress(bytes, requestId),
+      this.#engine.logger,
+      this.#engine.tracer,
+      this.#engine.dlq,
     );
     try {
       await runPipeline(source, transforms, destination);

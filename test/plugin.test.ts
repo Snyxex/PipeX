@@ -23,14 +23,14 @@ console.log(' 1. Single plugin: AES-256-GCM encrypt');
 console.log('════════════════════════════════════════');
 {
   const engine = new DataEngine();
-  engine.use(new EncryptionPlugin({ type: 'aes-256-gcm', key: AES_KEY }));
+  engine.use(new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: AES_KEY }));
 
-  const result = await engine.run('Hello, DataEngine!');
+  const result = await engine.binary.run('Hello, DataEngine!');
   console.log('Encrypted (hex):', result.data.toString('hex').slice(0, 40) + '…');
   console.log('Pipeline:       ', result.pipeline);
   console.log('Duration:       ', result.metrics.durationMs + 'ms');
 
-  const original = await engine.undo(result.data);
+  const original = await engine.binary.undo(result.data, 'string');
   console.log('Decrypted:      ', original.toString());
 }
 
@@ -43,12 +43,12 @@ console.log('══════════════════════�
   engine.use(new CompressionPlugin({ type: 'gzip', level: 6 }));
 
   const payload = 'a'.repeat(10_000); // highly compressible
-  const result  = await engine.run(payload);
+  const result  = await engine.binary.run(payload);
   const ratio   = ((1 - result.data.length / payload.length) * 100).toFixed(1);
   console.log(`Input:  ${payload.length} bytes`);
   console.log(`Output: ${result.data.length} bytes  (${ratio}% smaller)`);
 
-  const original = await engine.undo(result.data);
+  const original = await engine.binary.undo(result.data, 'string');
   console.log('Recovered:', original.toString().slice(0, 20) + '…');
 }
 
@@ -60,19 +60,19 @@ console.log('══════════════════════�
   const engine = new DataEngine();
   engine.use(new HashingPlugin({ algorithm: 'sha256', secret: HMAC_SECRET }));
 
-  const result = await engine.run('important document');
+  const result = await engine.binary.run('important document');
   console.log('Data + HMAC length:', result.data.length, 'bytes');
 
-  const original = await engine.undo(result.data);
+  const original = await engine.binary.undo(result.data, 'string');
   console.log('Verified & recovered:', original.toString());
 
   // Tamper detection
   const tampered = Buffer.from(result.data);
   tampered[0] = (tampered[0] as number) ^ 0xff;
   try {
-    await engine.undo(tampered);
+    await engine.binary.undo(tampered, 'string');
   } catch (e: any) {
-    console.log('Tamper detected ✅:', e.message.split(':')[1].trim());
+    console.log('Tamper detected ✅:', e.message.split(':')[1]?.trim() || e.message);
   }
 }
 
@@ -85,10 +85,10 @@ console.log('══════════════════════�
     .use(new BenchmarkPlugin())                                          // transparent, records metrics
     .use(new CompressionPlugin({ type: 'brotli', level: 4 }))           // step 1: compress
     .use(new HashingPlugin({ algorithm: 'sha256', secret: HMAC_SECRET })) // step 2: HMAC
-    .use(new EncryptionPlugin({ type: 'aes-256-gcm', key: AES_KEY }));   // step 3: encrypt
+    .use(new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: AES_KEY }));   // step 3: encrypt
 
   const payload = 'Sensitive payload: ' + 'x'.repeat(5_000);
-  const result  = await engine.run(payload);
+  const result  = await engine.binary.run(payload);
 
   console.log('Input size: ', payload.length, 'bytes');
   console.log('Final size: ', result.data.length, 'bytes');
@@ -96,7 +96,7 @@ console.log('══════════════════════�
   console.log('Step times: ', result.metrics.steps);
 
   // undo() runs in reverse: decrypt → verify HMAC → decompress
-  const recovered = await engine.undo(result.data);
+  const recovered = await engine.binary.undo<string>(result.data, 'string');
   console.log('Recovered:  ', recovered.toString().slice(0, 30) + '…');
   console.log('Match:      ', recovered.toString() === payload);
 }
@@ -109,10 +109,10 @@ console.log('══════════════════════�
   const engine = new DataEngine()
     .use(new CompressionPlugin({ type: 'gzip' }))
     .use(new HashingPlugin({ algorithm: 'sha512', secret: HMAC_SECRET }))
-    .use(new EncryptionPlugin({ type: 'chacha20-poly1305', key: CHACHA_KEY }));
+    .use(new EncryptionPlugin({ algorithm: 'chacha20-poly1305', key: CHACHA_KEY }));
 
-  const result    = await engine.run(Buffer.from('chacha + sha512 example'));
-  const recovered = await engine.undo(result.data);
+  const result    = await engine.binary.run(Buffer.from('chacha + sha512 example'));
+  const recovered = await engine.binary.undo(result.data, 'buffer');
   console.log('Recovered:', recovered.toString());
 }
 
@@ -123,11 +123,11 @@ console.log('══════════════════════�
 {
   const engine = new DataEngine()
     .use(new WorkerPoolPlugin({ maxThreads: 2 }))  // XOR across worker threads
-    .use(new EncryptionPlugin({ type: 'aes-256-gcm', key: AES_KEY }));
+    .use(new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: AES_KEY }));
 
   const payload   = randomBytes(64 * 1024); // 64 KB
-  const result    = await engine.run(payload);
-  const recovered = await engine.undo(result.data);
+  const result    = await engine.binary.run(payload);
+  const recovered = await engine.binary.undo<Buffer>(result.data, 'buffer');
   console.log('64 KB round-trip ok:', recovered.equals(payload));
   console.log('Duration:           ', result.metrics.durationMs + 'ms');
 }
@@ -137,7 +137,7 @@ console.log('\n═════════════════════�
 console.log(' 7. Stream mode');
 console.log('════════════════════════════════════════');
 {
-  // engine.stream() pipes a Readable through all plugin streams into a Writable.
+  // engine.stream.pipe() pipes a Readable through all plugin streams into a Writable.
   // Useful for large files where you don't want to load everything into memory.
 
   const chunks: Buffer[] = [];
@@ -148,14 +148,14 @@ console.log('══════════════════════�
 
   const engine = new DataEngine()
     .use(new CompressionPlugin({ type: 'gzip' }))
-    .use(new EncryptionPlugin({ type: 'aes-256-gcm', key: AES_KEY }));
+    .use(new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: AES_KEY }));
 
-  await engine.stream(input, output);
+  await engine.stream.pipe(input, output);
   const streamResult = Buffer.concat(chunks);
   console.log('Stream output size:', streamResult.length, 'bytes');
 
   // Decrypt + decompress the result using buffer-mode undo
-  const recovered = await engine.undo(streamResult);
+  const recovered = await engine.binary.undo<string>(streamResult, 'string');
   console.log('Stream recovered:  ', recovered.toString());
 }
 
@@ -167,16 +167,16 @@ console.log('══════════════════════�
   const key  = randomBytes(32);
   const data = 'same plaintext for both algorithms';
 
-  const aesEngine = new DataEngine().use(new EncryptionPlugin({ type: 'aes-256-gcm',       key }));
-  const ccEngine  = new DataEngine().use(new EncryptionPlugin({ type: 'chacha20-poly1305', key }));
+  const aesEngine = new DataEngine().use(new EncryptionPlugin({ algorithm: 'aes-256-gcm',       key }));
+  const ccEngine  = new DataEngine().use(new EncryptionPlugin({ algorithm: 'chacha20-poly1305', key }));
 
-  const aesResult = await aesEngine.run(data);
-  const ccResult  = await ccEngine.run(data);
+  const aesResult = await aesEngine.binary.run(data);
+  const ccResult  = await ccEngine.binary.run(data);
 
   console.log('AES ciphertext size:    ', aesResult.data.length);
   console.log('ChaCha ciphertext size: ', ccResult.data.length);
-  console.log('AES recovered:          ', (await aesEngine.undo(aesResult.data)).toString());
-  console.log('ChaCha recovered:       ', (await ccEngine.undo(ccResult.data)).toString());
+  console.log('AES recovered:          ', (await aesEngine.binary.undo(aesResult.data, 'string')).toString());
+  console.log('ChaCha recovered:       ', (await ccEngine.binary.undo(ccResult.data, 'string')).toString());
 }
 
 // ─── 9. Compression algorithm comparison ─────────────────────────────────────
@@ -188,7 +188,7 @@ console.log('══════════════════════�
 
   for (const type of ['gzip', 'brotli'] as const) {
     const engine = new DataEngine().use(new CompressionPlugin({ type }));
-    const result = await engine.run(payload);
+    const result = await engine.binary.run(payload);
     const ratio  = ((1 - result.data.length / payload.length) * 100).toFixed(1);
     console.log(`${type.padEnd(6)}: ${result.data.length} bytes  (${ratio}% reduction)`);
   }

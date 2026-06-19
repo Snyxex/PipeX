@@ -41,6 +41,9 @@ export class FileController {
       const transforms = buildTransformChain(
         this.#engine.plugins, 'compress', false,
         bytes => this.#engine.emitProgress(bytes, requestId),
+        this.#engine.logger,
+        this.#engine.tracer,
+        this.#engine.dlq,
       );
       await runPipeline(src, transforms, dst);
       this.#engine.endRequest(requestId);
@@ -61,6 +64,9 @@ export class FileController {
       const transforms = buildTransformChain(
         this.#engine.plugins, 'decompress', true,
         bytes => this.#engine.emitProgress(bytes, requestId),
+        this.#engine.logger,
+        this.#engine.tracer,
+        this.#engine.dlq,
       );
       await runPipeline(src, transforms, dst);
       this.#engine.endRequest(requestId);

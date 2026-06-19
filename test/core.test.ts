@@ -4,7 +4,7 @@
  */
 
 import { createReadStream, createWriteStream } from 'node:fs';
-import { DataEngine } from '../src/core/core.js';
+import { DataEngine } from '../src/core/dataEngine.js';
 import type { ProcessorPlugin, EngineResult }  from '../src/core/types.js';
 
 // ─── Minimal plugin example ───────────────────────────────────────────────────
