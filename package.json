@@ -1,67 +1,41 @@
 {
   "name": "pipex",
-  "version": "1.0",
-  "description": "A lightweight, modular data transformation engine for compression, encryption, hashing, validation, files, and streams.",
-  "main": "./dist/index.mjs",
-  "types": "./dist/index.d.mts",
+  "version": "0.1.0",
+  "description": "PipeX — A lightweight, modular data transformation engine. Effortlessly chain compression, encryption, and hashing through a unified stream-based architecture.",
+  "main": "src/index.ts",
   "type": "module",
-  "files": [
-    "dist",
-    "docs",
-    "README.md",
-    "LICENSE"
-  ],
   "scripts": {
-    "test": "tsx test/compression.test.ts && tsx test/core.test.ts && tsx test/worker.test.ts && tsx test/plugin.test.ts && tsx test/file.test.ts && tsx test/config.test.ts && tsx test/validation.test.ts && tsx test/security.test.ts && tsx test/resilience.test.ts && tsx test/observability.test.ts && tsx test/performance_updates.test.ts && tsx test/worker_piscina.test.ts",
-    "typecheck": "tsc --noEmit",
     "test:comp": "tsx test/compression.test.ts",
     "test:core": "tsx test/core.test.ts",
     "test:worker": "tsx test/worker.test.ts",
     "test:plugin": "tsx test/plugin.test.ts",
     "test:file": "tsx test/file.test.ts",
-    "build": "tsdown --minify",
-    "prepack": "npm run build",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build",
-    "pack:dry-run": "npm pack --dry-run"
+    "build": "tsdown --minify"
   },
   "keywords": [
     "data",
     "engine",
-    "pipeline",
-    "stream",
     "hashing",
     "compression",
     "encryption",
     "binary",
-    "transformation",
-    "msgpack"
+    "transformation"
   ],
   "author": "Snyxex",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Snyxex/PipeX.git"
-  },
-  "bugs": {
-    "url": "https://github.com/Snyxex/PipeX/issues"
-  },
-  "homepage": "https://github.com/Snyxex/PipeX#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "engines": {
     "node": ">=20.0.0"
-  },
-  "dependencies": {
-    "msgpackr": "^1.11.9",
-    "piscina": "^5.2.0",
-    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "tsdown": "^0.21.10",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "msgpackr": "^1.11.9",
+    "piscina": "^5.2.0",
+    "zod": "^4.3.6"
   },
   "exports": {
     ".": {

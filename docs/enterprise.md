@@ -1,136 +1,115 @@
-# Enterprise Features
+# PipeX Enterprise Guide
 
-This guide covers operational, security, and reliability features.
+This guide describes how to use the enterprise-grade features of PipeX to build robust, secure, and observable data pipelines.
 
-## Audit Logging
+## 📊 Observability
 
-Use `setAuditLogger()` to capture records for binary processing and reversing.
+Enterprise applications must be observable. PipeX provides built-in hooks for structured logging and distributed tracing.
 
-```ts
+### Structured Logging
+PipeX can be integrated with loggers like **Pino** or **Winston**.
+
+```typescript
+import pino from 'pino';
+const logger = pino();
+
+engine.setLogger({
+  info:  (msg, ctx) => logger.info(ctx, msg),
+  warn:  (msg, ctx) => logger.warn(ctx, msg),
+  error: (msg, ctx) => logger.error(ctx, msg),
+  debug: (msg, ctx) => logger.debug(ctx, msg),
+});
+```
+
+### Distributed Tracing
+PipeX is compatible with **OpenTelemetry**. You can inject a tracer to track plugin execution time and pipeline latency.
+
+```typescript
+engine.setTracer(myOtelTracer);
+```
+
+---
+
+## 🛡️ Resilience
+
+Transient failures are inevitable in distributed systems. PipeX handles them with automatic retries and Dead Letter Queues (DLQ).
+
+### Automatic Retries
+Plugins can specify retry policies.
+
+```typescript
+const plugin = new MyPlugin();
+plugin.retryOptions = {
+  attempts: 3,
+  backoff: 'exponential',
+  delayMs: 1000
+};
+```
+
+### Dead Letter Queue (DLQ)
+When a plugin fails after all retries, the original data chunk can be diverted to a DLQ instead of crashing the pipeline.
+
+```typescript
+import { createWriteStream } from 'node:fs';
+engine.setDlq(createWriteStream('errors.log'));
+```
+
+---
+
+## 🔐 Security & Compliance
+
+### KMS Encryption
+PipeX supports **Envelope Encryption** via external Key Management Services (KMS).
+
+```typescript
+import { KmsEncryptionPlugin } from 'pipex/plugins/kms';
+
+engine.use(new KmsEncryptionPlugin({
+  kms: new MyKmsProvider(), // Implements KmsProvider
+  keyId: 'arn:aws:kms:us-east-1:123456789012:key/...'
+}));
+```
+
+### Audit Logging
+Every `run`, `undo`, `pack`, and `unpack` operation can be audited.
+
+```typescript
 engine.setAuditLogger({
-  async log(record) {
-    await auditStore.write(record);
-  },
-});
-```
-
-Audit records include:
-
-- `requestId`
-- `operation`
-- `pluginChain`
-- `timestamp`
-- `metadata`
-
-Use this for compliance, investigation, and pipeline history.
-
-## Structured Logging
-
-Use `setLogger()` with any logger that supports `info`, `warn`, `error`, and `debug`.
-
-```ts
-engine.setLogger(logger);
-```
-
-Use this for request start/end logs, plugin retry logs, and pipeline errors.
-
-## Tracing
-
-Use `setTracer()` with an OpenTelemetry-style adapter.
-
-```ts
-engine.setTracer(tracer);
-```
-
-PipeX starts spans for binary runs and plugin execution. Spans can receive attributes and events.
-
-## Schema Registry
-
-Use `setSchemaRegistry()` and `loadSchema()` when schemas are managed outside the application.
-
-```ts
-engine.setSchemaRegistry({
-  async getSchema(subject, version) {
-    return fetchSchema(subject, version);
-  },
-});
-
-await engine.loadSchema('user', 2);
-```
-
-Use this when multiple services must share schema versions.
-
-## Dead Letter Queue
-
-Use `setDlq()` with stream pipelines to preserve failed chunks.
-
-```ts
-engine.setDlq(deadLetterWritable);
-await engine.stream.pipe(input, output);
-```
-
-If a plugin fails after retries and a DLQ is configured, PipeX writes the original chunk to the DLQ and drops it from the main stream.
-
-Use this for streaming systems where one bad chunk should not stop the whole pipeline.
-
-## Retry Policies
-
-Plugins can define retry behavior.
-
-```ts
-class RemotePlugin extends BasePlugin {
-  name = 'remote';
-  version = '1.0.0';
-  retryOptions = {
-    attempts: 3,
-    backoff: 'exponential' as const,
-    delayMs: 100,
-  };
-
-  async process(data: Buffer) {
-    return callRemoteTransform(data);
+  log: async (record) => {
+    // Save to a secure audit database
+    await db.audit.insert(record);
   }
-}
+});
 ```
 
-Use retries for transient failures. Do not use them to hide deterministic data errors.
+---
 
-## Path Safety
+## 🚀 Performance
 
-File APIs accept `allowedRoot`.
+### Warm Worker Pools
+For heavy CPU tasks, use the `WorkerPoolPlugin` which utilizes a persistent pool of warm workers via `piscina`.
 
-```ts
-await engine.file.process(inputPath, outputPath, '/var/app/uploads');
+```typescript
+import { WorkerPoolPlugin } from 'pipex/plugins/worker';
+engine.use(new WorkerPoolPlugin({ maxThreads: 4 }));
 ```
 
-PipeX resolves the input path and rejects paths outside the allowed root.
+---
 
-Use this with user-controlled file paths.
+## ⚙️ DevOps & Configuration
 
-## Envelope Encryption with KMS
+### Environment-Driven Setup
+Bootstrap your engine from a JSON or YAML configuration file.
 
-`KmsEncryptionPlugin` implements envelope encryption:
-
-1. Generate a data key through a KMS provider.
-2. Encrypt payload locally with AES-256-GCM.
-3. Store the encrypted data key in the payload header.
-4. Decrypt the data key through KMS during reverse processing.
-
-```ts
-const engine = new DataEngine()
-  .use(new Plugins.KmsEncryption({
-    kms,
-    keyId: 'alias/pipex',
-  }));
+```typescript
+const config = await readConfig('pipex.prod.json');
+const engine = await DataEngine.fromConfig(config);
 ```
 
-Use this when encryption keys must be controlled by an external KMS.
+### Schema Registry
+Ensure data consistency by fetching Zod schemas from a central registry.
 
-## Production Pipeline Recommendations
-
-- Compress before encryption.
-- Hash before encryption if you want integrity metadata inside the encrypted envelope.
-- Keep encryption keys outside source code.
-- Use schema validation before expensive transformations.
-- Use `allowedRoot` for user-provided file paths.
-- Run `npm run typecheck`, `npm run build`, and `npm test` before publishing.
+```typescript
+engine.setSchemaRegistry(myRegistry);
+await engine.loadSchema('transactions/v1');
+```

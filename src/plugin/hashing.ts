@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { Transform } from 'node:stream';
+import { Transform, type TransformCallback } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
 import type { ProcessorContext } from '../core/types.js';
 

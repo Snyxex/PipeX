@@ -6,7 +6,7 @@ import type { SchemaRegistry } from '../src/core/types.js';
 class ConfigPlugin extends BasePlugin {
   name = 'config-plugin';
   version = '1.0.0';
-  constructor(public override options: any) { super(options); }
+  constructor(public options: any) { super(); }
   process(data: Buffer) { return data; }
 }
 

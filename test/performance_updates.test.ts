@@ -1,7 +1,7 @@
 import { DataEngine } from '../src/core/dataEngine.js';
 import { detectType, toBuffer, fromBuffer } from '../src/core/core.js';
 import type { ProcessorPlugin } from '../src/core/types.js';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import assert from 'node:assert';
 
 async function testPerformanceUpdates() {

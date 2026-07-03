@@ -35,16 +35,13 @@ async function testSecurity() {
   engine.use(new KmsEncryptionPlugin({ kms, keyId: 'alias/pipex' }));
 
   const input = { sensitive: 'data' };
-  await engine.binary.run(input);
+  const result = await engine.binary.run(input);
   
   // Verify Audit
   if (audit.records.length === 0) {
     throw new Error('Audit logger should have captured the operation');
   }
   const lastRecord = audit.records[0];
-  if (!lastRecord) {
-    throw new Error('Audit logger should have captured at least one record');
-  }
   if (lastRecord.operation !== 'process') {
     throw new Error(`Unexpected audit operation: ${lastRecord.operation}`);
   }
