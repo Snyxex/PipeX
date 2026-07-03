@@ -29,6 +29,14 @@ const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 const HEADER_LENGTH = 1 + IV_LENGTH + TAG_LENGTH; // [algo][iv][tag]
 
+function algorithmFromId(algoId: number): EncryptionAlgorithm {
+  const algorithm = ID_TO_ALGO[algoId];
+  if (!algorithm) {
+    throw new Error(`[PipeX] Decryption failed: unknown algorithm id ${algoId}`);
+  }
+  return algorithm;
+}
+
 /**
  * EncryptionPlugin — Standard library plugin for AES-GCM and ChaCha20-Poly1305.
  * Uses a combined header: [1B algo][12B IV][16B AuthTag]
@@ -61,7 +69,7 @@ export class EncryptionPlugin extends BasePlugin {
     if (data.length < HEADER_LENGTH) throw new Error('[PipeX] Decryption failed: packet too short');
 
     const algoId = data.readUInt8(0);
-    const algo = ID_TO_ALGO[algoId];
+    const algo = algorithmFromId(algoId);
     const iv = data.subarray(1, 1 + IV_LENGTH);
     const tag = data.subarray(1 + IV_LENGTH, HEADER_LENGTH);
     const ciphertext = data.subarray(HEADER_LENGTH);
@@ -78,7 +86,6 @@ export class EncryptionPlugin extends BasePlugin {
     if (mode === 'compress') {
       const iv = randomBytes(IV_LENGTH);
       const cipher = createCipheriv(algorithm, key, iv, { authTagLength: TAG_LENGTH } as any) as CipherGCM;
-      let headerSent = false;
       const dataChunks: Buffer[] = [];
 
       return new Transform({
@@ -108,7 +115,7 @@ export class EncryptionPlugin extends BasePlugin {
             headBuf = Buffer.concat([headBuf, chunk]);
             if (headBuf.length >= HEADER_LENGTH) {
               const algoId = headBuf.readUInt8(0);
-              const algo = ID_TO_ALGO[algoId];
+              const algo = algorithmFromId(algoId);
               const iv = headBuf.subarray(1, 1 + IV_LENGTH);
               const tag = headBuf.subarray(1 + IV_LENGTH, HEADER_LENGTH);
               

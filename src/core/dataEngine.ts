@@ -12,7 +12,7 @@
 
 import { EventEmitter }         from 'node:events';
 import { randomUUID }           from 'node:crypto';
-import { Readable, Writable }   from 'node:stream';
+import { Writable }             from 'node:stream';
 import { z }                    from 'zod';
 import type { 
   ProcessorPlugin, 

@@ -21,7 +21,7 @@ class MockSpan implements Span {
 
 class MockTracer implements Tracer {
   spans: MockSpan[] = [];
-  startSpan(name: string) {
+  startSpan(_name: string) {
     const s = new MockSpan();
     this.spans.push(s);
     return s;

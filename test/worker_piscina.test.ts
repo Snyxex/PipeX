@@ -11,7 +11,7 @@ async function testWorkerPiscina() {
   const result = await engine.binary.run(input);
   
   // XOR with 0x42 twice should return the original string
-  const restored = await engine.binary.undo(result);
+  const restored = await engine.binary.undo<Buffer>(result);
   
   if (restored.toString() !== 'Hello Piscina') {
     throw new Error(`Worker transformation failed. Expected "Hello Piscina", got "${restored.toString()}"`);

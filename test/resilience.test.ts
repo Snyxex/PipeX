@@ -6,11 +6,11 @@ import type { ProcessorContext } from '../src/core/types.js';
 class FlakyPlugin extends BasePlugin {
   name = 'flaky';
   version = '1.0.0';
+  retryOptions = { attempts: 3, backoff: 'fixed' as const, delayMs: 10 };
   attempts = 0;
   
   constructor(private failUntil: number) {
     super();
-    this.retryOptions = { attempts: 3, backoff: 'fixed', delayMs: 10 };
   }
 
   process(data: Buffer, _ctx: ProcessorContext) {
@@ -60,8 +60,9 @@ async function testResilience() {
   if (dlqChunks.length === 0) {
     throw new Error('DLQ should have received the failed chunk');
   }
-  if (dlqChunks[0].toString() !== 'poison pill') {
-    throw new Error(`Unexpected DLQ chunk: ${dlqChunks[0].toString()}`);
+  const firstDlqChunk = dlqChunks[0];
+  if (!firstDlqChunk || firstDlqChunk.toString() !== 'poison pill') {
+    throw new Error(`Unexpected DLQ chunk: ${firstDlqChunk?.toString()}`);
   }
   
   console.log('✅ DLQ test passed!');

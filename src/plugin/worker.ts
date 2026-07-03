@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { Transform } from 'node:stream';
 import { Piscina } from 'piscina';
 import { BasePlugin } from '../core/plugin.js';
@@ -7,6 +8,9 @@ import type { ProcessorContext } from '../core/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const workerFile = existsSync(join(__dirname, 'worker_piscina.mjs'))
+  ? join(__dirname, 'worker_piscina.mjs')
+  : join(__dirname, 'worker_piscina.js');
 
 export interface WorkerPoolOptions {
   maxThreads?: number;
@@ -24,15 +28,16 @@ export class WorkerPoolPlugin extends BasePlugin {
   constructor(options: WorkerPoolOptions = {}) {
     super(options);
     this.pool = new Piscina({
-      filename: join(__dirname, 'worker_piscina.js'),
+      filename: workerFile,
       maxThreads: options.maxThreads,
     });
   }
 
   public override async process(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
     // Transfer the buffer to the worker pool
-    const ab = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-    const resultAb = await this.pool.run(ab, { transferList: [ab] });
+    const ab = new ArrayBuffer(data.byteLength);
+    new Uint8Array(ab).set(data);
+    const resultAb = await this.pool.run(ab);
     return Buffer.from(resultAb as ArrayBuffer);
   }
 

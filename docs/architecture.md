@@ -1,72 +1,132 @@
-# PipeX Architecture Guide
+# Architecture
 
-This document describes the internal design and philosophy of the PipeX Data Engine.
+PipeX is organized around a small core and three controllers.
 
-## 🏗️ The Three-Tier Design
+## High-Level Flow
 
-PipeX is built on three distinct layers to ensure maximum separation of concerns:
+```text
+DataEngine
+  ├─ binary controller: values and buffers
+  ├─ file controller: file streams
+  ├─ stream controller: Node.js streams
+  └─ plugin list: ordered ProcessorPlugin instances
+```
 
-### 1. The Facade (`DataEngine`)
-The `DataEngine` is the single entry point for the user. It manages:
-- **Plugin Registry:** An ordered list of transformations.
-- **Global Schema:** The Zod schema used for core validation.
-- **Event Lifecycle:** Emitting `start`, `progress`, `plugin:after`, `error`, and `end`.
-- **Controller Wiring:** Delegating tasks to specialized controllers.
+## DataEngine Responsibilities
 
-### 2. The Controllers (`src/core/controllers/`)
-Controllers handle the orchestration for specific I/O environments:
-- **BinaryController:** Optimized for `Buffer` and `Object` operations.
-- **FileController:** Optimized for `fs.ReadStream` and `fs.WriteStream`.
-- **StreamController:** Optimized for raw Node.js `Transform` and `PassThrough` pipes.
+`DataEngine` owns cross-cutting behavior:
 
-### 3. Core Primitives (`src/core/core.ts`)
-The core contains **stateless pure functions** and stream factories. It has no knowledge of the `DataEngine` or its state. This makes the core logic highly reusable and easy to unit test.
+- Plugin registration.
+- Global schema validation.
+- Lifecycle events.
+- Logger and tracer references.
+- Dead letter queue stream.
+- Audit logger.
+- Schema registry.
 
----
+Controllers call back into the engine for lifecycle events, progress, errors, validation, and plugin access.
 
-## 📜 The Manifest System
+## Controller Responsibilities
 
-When you "pack" data using PipeX, the engine prepends a **PipeX Manifest** frame (encoded in MsgPack) to the beginning of the byte stream.
+### Binary Controller
 
-```typescript
-export interface PipeXManifest {
-  readonly __pipex_v: 1;      // Protocol version
-  readonly plugins:   string[]; // name@version in execution order
-  readonly ts:        number;   // Unix timestamp
+The binary controller converts input values into buffers, executes plugin `process()` methods in order, and returns an `EngineResult`.
+
+During `undo()`, it executes plugin `reverse()` methods in reverse order and converts the final buffer back to the original or requested type.
+
+### File Controller
+
+The file controller creates read and write streams, builds a transform chain, and runs the pipeline with `node:stream/promises`.
+
+It is intended for large data because it does not require the full file in memory.
+
+### Stream Controller
+
+The stream controller exposes lower-level primitives for existing Node.js stream workflows.
+
+It supports:
+
+- Full source-to-destination pipeline orchestration.
+- Writable endpoints.
+- Reverse writable endpoints.
+- MsgPack pack and unpack transforms.
+
+## Plugin Execution
+
+Plugins implement:
+
+```ts
+process(data, ctx)
+reverse?(data, ctx)
+createStream?(mode)
+```
+
+For stream pipelines, PipeX uses `createStream()` if the plugin provides it. Otherwise, it wraps `process()` and `reverse()` in a fallback transform.
+
+## Reverse Processing
+
+A pipeline registered as:
+
+```text
+compression -> hashing -> encryption
+```
+
+is reversed as:
+
+```text
+decryption -> HMAC verification -> decompression
+```
+
+This behavior is central to reversible pipelines.
+
+## Manifest System
+
+PipeX manifests record the plugin chain.
+
+```ts
+interface PipeXManifest {
+  __pipex_v: 1;
+  plugins: string[];
+  ts: number;
 }
 ```
 
-### Why it matters:
-- **Self-Healing:** When you call `undo()`, PipeX reads the manifest first. It can warn you if your current engine version or plugin configuration differs from what was used to pack the data.
-- **Security:** It prevents trying to decrypt or decompress data with an incompatible pipeline, which could lead to crashes or corrupted memory.
+Manifest use cases:
 
----
+- Inspect which pipeline produced a payload.
+- Warn when current plugins do not match a payload.
+- Carry metadata through binary or file transports.
 
-## 🔌 Plugin Contract
+## Serialization
 
-Every plugin must implement the `ProcessorPlugin` interface:
+PipeX uses `msgpackr` for object and array serialization.
 
-```typescript
-export interface ProcessorPlugin {
-  readonly name:    string;
-  readonly version: string;
-  
-  // For in-memory Buffer processing
-  process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> | Buffer;
-  reverse?(data: Buffer, ctx: ProcessorContext): Promise<Buffer> | Buffer;
-  
-  // For zero-copy Stream processing
-  createStream?(mode: 'compress' | 'decompress'): Transform;
-}
+Conversion rules:
+
+| Input | Buffer conversion |
+| --- | --- |
+| `Buffer` | Used directly. |
+| `ArrayBuffer` | Converted with `Buffer.from`. |
+| object or array | MsgPack encoded. |
+| number or boolean | String encoded. |
+| string | UTF-8 encoded. |
+| null or undefined | Empty or null representation depending on restoration target. |
+
+## Error Handling
+
+Controllers emit `error` and then rethrow. Stream fallback transforms can divert failed chunks to the configured DLQ.
+
+Plugin retries are handled by `withRetry()` when `retryOptions` are present.
+
+## Build Layout
+
+The package build emits:
+
+```text
+dist/index.mjs
+dist/index.d.mts
+dist/worker_piscina.mjs
+dist/worker_piscina.d.mts
 ```
 
-### Stream Fallback
-If a plugin does **not** implement `createStream`, PipeX automatically wraps the `process`/`reverse` methods in a `Transform` stream. This ensures that every plugin works in a streaming context, though implementing a native `createStream` is always more efficient.
-
----
-
-## 🚀 Performance Design
-
-1. **Zero-Copy Subarrays:** PipeX uses `Buffer.subarray()` wherever possible to avoid expensive memory copies.
-2. **MsgPack over JSON:** Internal serialization uses `msgpackr`, which is significantly faster and produces smaller payloads than `JSON.stringify`.
-3. **Sliding Windows:** Complex plugins (like `HashingPlugin` and `EncryptionPlugin`) use sliding buffer windows in stream mode to handle trailing data (like AuthTags and HMACs) without loading the entire stream into RAM.
+`WorkerPoolPlugin` needs the worker artifact beside `dist/index.mjs`.

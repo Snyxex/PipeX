@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DataEngine, Plugins } from '../src/index.js';
+import { DataEngine } from '../src/index.js';
 import assert from 'node:assert';
 
 async function testValidationPlugin() {

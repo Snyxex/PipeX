@@ -1,59 +1,46 @@
-import { DataEngine, WorkerPoolPlugin } from '../src/index.js';
-
 import { Buffer } from 'node:buffer';
 import { availableParallelism } from 'node:os';
+import { DataEngine, WorkerPoolPlugin } from '../src/index.js';
 
-async function runMultiCoreBenchmark() {
+async function runWorkerPoolTest() {
   const engine = new DataEngine();
   engine.use(new WorkerPoolPlugin({ maxThreads: 2 }));
 
-  const GB_SIZE = 8; 
-  const TOTAL_BYTES = GB_SIZE * 1024 * 1024 * 1024;
+  const totalBytes = 1024 * 1024;
   const cores = availableParallelism();
 
-  console.log(`\n☢️  STARTING MULTI-CORE WORKER POOL TEST`);
-  console.log(`==================================================`);
-  console.log(`📦 Datenmenge:       ${GB_SIZE} GB`);
-  console.log(`🧠 CPU-Kerne:        ${cores} Threads`);
-  console.log(`🛠️  Modus:            Parallel Worker Partitioning`);
-  console.log(`⏱️  Verarbeitung läuft...`);
+  console.log('\nSTARTING WORKER POOL TEST');
+  console.log('==================================================');
+  console.log(`Data size:       ${totalBytes} bytes`);
+  console.log(`CPU cores:       ${cores} threads`);
+  console.log('Mode:            Parallel worker processing');
 
-  // Wir erstellen die Testdaten
-  // Hinweis: Bei 8GB stellt Node.js sicher, dass dein RAM das hergibt.
-  const testData = Buffer.alloc(TOTAL_BYTES, 'A');
-
+  const testData = Buffer.alloc(totalBytes, 'A');
   const start = performance.now();
-  
-  // Die Engine verteilt die Arbeit nun automatisch auf alle Kerne
-  const result = await engine.run(testData);
-  
+  const result = await engine.binary.run(testData);
   const end = performance.now();
 
   const durationMs = end - start;
   const durationSec = durationMs / 1000;
-  const throughput = (TOTAL_BYTES / 1024 / 1024) / durationSec;
+  const throughput = (totalBytes / 1024 / 1024) / durationSec;
 
-  console.log(`\n✅ Ergebnis:`);
-  console.log(`--------------------------------------------------`);
-  console.log(`Total Time:     ${durationMs.toFixed(2)} ms`);
-  console.log(`Effektiver Speed: ${throughput.toFixed(2)} MB/s`);
-  
-  // Validierung: Haben die Worker wirklich gearbeitet?
-  // Da XOR symmetrisch ist, testen wir ein Byte ( 'A' ^ 0x42 )
+  console.log('\nResult:');
+  console.log('--------------------------------------------------');
+  console.log(`Total time:      ${durationMs.toFixed(2)} ms`);
+  console.log(`Effective speed: ${throughput.toFixed(2)} MB/s`);
+
   const expectedByte = 'A'.charCodeAt(0) ^ 0x42;
-  if (result.data[0] === expectedByte) {
-    console.log(`Integrität:     ✅ Korrekt (Daten wurden manipuliert)`);
-  } else {
-    console.log(`Integrität:     ❌ Fehler (Daten unverändert oder falsch)`);
+  if (result.data[0] !== expectedByte) {
+    throw new Error('WorkerPoolPlugin returned unchanged or invalid data');
   }
 
-  console.log(`==================================================\n`);
-  
-  // Prozess explizit beenden, da Worker-Threads manchmal den Event-Loop offen halten
+  console.log('Integrity:       Correct');
+  console.log('==================================================\n');
+
   process.exit(0);
 }
 
-runMultiCoreBenchmark().catch((err) => {
-  console.error("Benchmark Crash:", err);
+runWorkerPoolTest().catch((err) => {
+  console.error('Worker pool test failed:', err);
   process.exit(1);
 });

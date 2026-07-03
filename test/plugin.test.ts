@@ -30,7 +30,7 @@ console.log('══════════════════════�
   console.log('Pipeline:       ', result.pipeline);
   console.log('Duration:       ', result.metrics.durationMs + 'ms');
 
-  const original = await engine.binary.undo(result.data, 'string');
+  const original = await engine.binary.undo<string>(result.data, 'string');
   console.log('Decrypted:      ', original.toString());
 }
 
@@ -48,7 +48,7 @@ console.log('══════════════════════�
   console.log(`Input:  ${payload.length} bytes`);
   console.log(`Output: ${result.data.length} bytes  (${ratio}% smaller)`);
 
-  const original = await engine.binary.undo(result.data, 'string');
+  const original = await engine.binary.undo<string>(result.data, 'string');
   console.log('Recovered:', original.toString().slice(0, 20) + '…');
 }
 
@@ -63,7 +63,7 @@ console.log('══════════════════════�
   const result = await engine.binary.run('important document');
   console.log('Data + HMAC length:', result.data.length, 'bytes');
 
-  const original = await engine.binary.undo(result.data, 'string');
+  const original = await engine.binary.undo<string>(result.data, 'string');
   console.log('Verified & recovered:', original.toString());
 
   // Tamper detection
@@ -112,7 +112,7 @@ console.log('══════════════════════�
     .use(new EncryptionPlugin({ algorithm: 'chacha20-poly1305', key: CHACHA_KEY }));
 
   const result    = await engine.binary.run(Buffer.from('chacha + sha512 example'));
-  const recovered = await engine.binary.undo(result.data, 'buffer');
+  const recovered = await engine.binary.undo<Buffer>(result.data, 'buffer');
   console.log('Recovered:', recovered.toString());
 }
 
@@ -175,8 +175,8 @@ console.log('══════════════════════�
 
   console.log('AES ciphertext size:    ', aesResult.data.length);
   console.log('ChaCha ciphertext size: ', ccResult.data.length);
-  console.log('AES recovered:          ', (await aesEngine.binary.undo(aesResult.data, 'string')).toString());
-  console.log('ChaCha recovered:       ', (await ccEngine.binary.undo(ccResult.data, 'string')).toString());
+  console.log('AES recovered:          ', (await aesEngine.binary.undo<string>(aesResult.data, 'string')).toString());
+  console.log('ChaCha recovered:       ', (await ccEngine.binary.undo<string>(ccResult.data, 'string')).toString());
 }
 
 // ─── 9. Compression algorithm comparison ─────────────────────────────────────
