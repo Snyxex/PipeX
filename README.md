@@ -20,6 +20,7 @@ Unlike simple pipe utilities, PipeX is a **Data Highway** that ensures your data
 ## 📦 Installation
 
 ```bash
+In future maybe on npm 
 npm install pipex zod
 ```
 
