@@ -8,7 +8,7 @@
 
 import { randomUUID }                                            from 'node:crypto';
 import { pipeline }                                              from 'node:stream/promises';
-import { Readable, Writable, Transform, type TransformCallback } from 'node:stream';
+import { Readable, Writable, Transform, Duplex, type TransformCallback } from 'node:stream';
 import { Packr, Unpackr, PackrStream, UnpackrStream }            from 'msgpackr';
 import { 
   type ProcessorPlugin, 
@@ -18,6 +18,8 @@ import {
   type Tracer,
   type Span,
   type RetryOptions,
+  type EngineLimits,
+  type StreamPluginContext,
   isManifest 
 } from './types.js';
 
@@ -32,11 +34,21 @@ export async function withRetry<T>(
   fn: () => Promise<T> | T,
   options?: RetryOptions,
   logger?: Logger,
+  control?: { signal?: AbortSignal; limits?: Pick<EngineLimits, 'maxRetryAttempts' | 'maxRetryDelayMs'> },
 ): Promise<T> {
   const { attempts = 1, backoff = 'fixed', delayMs = 0 } = options ?? {};
+  const maxAttempts = control?.limits?.maxRetryAttempts ?? 5;
+  const maxDelay = control?.limits?.maxRetryDelayMs ?? 30_000;
+  if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > maxAttempts) {
+    throw new Error(`[PipeX] Invalid retry attempts: ${attempts}`);
+  }
+  if (!Number.isSafeInteger(delayMs) || delayMs < 0 || delayMs > maxDelay) {
+    throw new Error(`[PipeX] Invalid retry delay: ${delayMs}`);
+  }
   let lastError: Error | undefined;
 
   for (let i = 0; i < attempts; i++) {
+    control?.signal?.throwIfAborted();
     try {
       return await fn();
     } catch (err: unknown) {
@@ -44,7 +56,18 @@ export async function withRetry<T>(
       if (i < attempts - 1) {
         const nextDelay = backoff === 'exponential' ? delayMs * Math.pow(2, i) : delayMs;
         logger?.debug(`[PipeX] Retry ${i + 1}/${attempts} after ${nextDelay}ms`, { error: lastError.message });
-        if (nextDelay > 0) await new Promise(resolve => setTimeout(resolve, nextDelay));
+        if (nextDelay > 0) {
+          await new Promise<void>((resolve, reject) => {
+            const cleanup = () => control?.signal?.removeEventListener('abort', onAbort);
+            const timer = setTimeout(() => { cleanup(); resolve(); }, Math.min(nextDelay, maxDelay));
+            const onAbort = () => {
+              clearTimeout(timer);
+              cleanup();
+              reject(control?.signal?.reason ?? new Error('[PipeX] Operation aborted'));
+            };
+            control?.signal?.addEventListener('abort', onAbort, { once: true });
+          });
+        }
       }
     }
   }
@@ -61,11 +84,21 @@ export const UNPACKR = new Unpackr({ useRecords: false });
 
 export const MAX_FRAME_BYTES    = 256 * 1024 * 1024;
 export const DEFAULT_HIGH_WATER = 64  * 1024;
+export const DEFAULT_LIMITS: Readonly<EngineLimits> = Object.freeze({
+  maxInputBytes: 64 * 1024 * 1024,
+  maxOutputBytes: 256 * 1024 * 1024,
+  maxFrameBytes: 8 * 1024 * 1024,
+  maxFrames: 100_000,
+  maxConcurrentOperations: 32,
+  operationTimeoutMs: 5 * 60_000,
+  maxRetryAttempts: 5,
+  maxRetryDelayMs: 30_000,
+});
 
 // ─── Type helpers ─────────────────────────────────────────────────────────────
 
 type PluginWithStream = ProcessorPlugin & {
-  createStream(mode: 'compress' | 'decompress'): Transform;
+  createStream(mode: 'compress' | 'decompress', context?: StreamPluginContext): Duplex;
 };
 
 export function hasStreamSupport(p: ProcessorPlugin): p is PluginWithStream {
@@ -131,8 +164,9 @@ export function makeContext(
   extra: Record<string, unknown> = {},
   logger?: Logger,
   span?:   Span,
+  signal?: AbortSignal,
 ): ProcessorContext {
-  return { requestId, timestamp: Date.now(), metadata: extra, logger, span };
+  return { requestId, timestamp: Date.now(), metadata: extra, logger, span, signal };
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
@@ -163,6 +197,10 @@ export function buildManifestHeaderTransform(manifest: PipeXManifest): Transform
         cb(null, chunk);
       }
     },
+    flush(cb: TransformCallback) {
+      if (!sent) this.push(frame);
+      cb();
+    },
   });
 }
 
@@ -181,7 +219,10 @@ export function buildManifestExtractTransform(
     transform(frame: unknown, _enc: BufferEncoding, cb: TransformCallback) {
       if (!seen) {
         seen = true;
-        if (isManifest(frame)) { onManifest(frame); cb(); return; }
+        if (isManifest(frame)) {
+          try { onManifest(frame); cb(); } catch (error) { cb(error as Error); }
+          return;
+        }
       }
       cb(null, frame);
     },
@@ -192,9 +233,18 @@ export function buildManifestExtractTransform(
 
 /** DoS-safe UnpackrStream subclass — rejects oversized raw chunks before decode. */
 export class GuardedUnpackrStream extends UnpackrStream {
+  #receivedBytes = 0;
+  readonly #maxInputBytes: number;
+
+  constructor(options: Record<string, unknown> = {}, maxInputBytes = DEFAULT_LIMITS.maxInputBytes) {
+    super(options);
+    this.#maxInputBytes = maxInputBytes;
+  }
+
   override _transform(chunk: Buffer, enc: BufferEncoding, cb: TransformCallback): void {
-    if (chunk.length > MAX_FRAME_BYTES) {
-      cb(new Error(`[PipeX] Frame too large: ${chunk.length} bytes (max ${MAX_FRAME_BYTES})`));
+    this.#receivedBytes += chunk.length;
+    if (this.#receivedBytes > this.#maxInputBytes) {
+      cb(new Error(`[PipeX] Serialized input exceeds ${this.#maxInputBytes} bytes`));
       return;
     }
     super._transform(chunk, enc, cb);
@@ -207,8 +257,38 @@ export function createPackrStream(): PackrStream {
 }
 
 /** GuardedUnpackrStream with useRecords disabled. */
-export function createUnpackrStream(): GuardedUnpackrStream {
-  return new GuardedUnpackrStream({ useRecords: false });
+export function createUnpackrStream(maxInputBytes = DEFAULT_LIMITS.maxInputBytes): GuardedUnpackrStream {
+  return new GuardedUnpackrStream({ useRecords: false }, maxInputBytes);
+}
+
+export function buildByteLimitTransform(maxBytes: number, label: string): Transform {
+  let total = 0;
+  return new Transform({
+    transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
+      total += chunk.length;
+      if (total > maxBytes) {
+        cb(new Error(`[PipeX] ${label} exceeds ${maxBytes} bytes`));
+        return;
+      }
+      cb(null, chunk);
+    },
+  });
+}
+
+export function buildObjectLimitTransform(maxFrames: number): Transform {
+  let count = 0;
+  return new Transform({
+    writableObjectMode: true,
+    readableObjectMode: true,
+    transform(value: unknown, _enc: BufferEncoding, cb: TransformCallback) {
+      count++;
+      if (count > maxFrames) {
+        cb(new Error(`[PipeX] Decoded frame count exceeds ${maxFrames}`));
+        return;
+      }
+      cb(null, value);
+    },
+  });
 }
 
 /**
@@ -223,8 +303,9 @@ export function buildFallbackTransform(
   logger?: Logger,
   tracer?: Tracer,
   dlq?:    Writable,
+  streamContext?: StreamPluginContext,
 ): Transform {
-  const requestId = `stream-${randomUUID()}`;
+  const requestId = streamContext?.requestId ?? `stream-${randomUUID()}`;
   return new Transform({
     async transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
       const span = tracer?.startSpan(`plugin:${plugin.name}`, { requestId } as any);
@@ -232,12 +313,19 @@ export function buildFallbackTransform(
       span?.setAttribute('mode', reverse ? 'reverse' : 'process');
 
       try {
-        const ctx = makeContext(requestId, {}, logger, span);
-        const fn  = reverse && typeof plugin.reverse === 'function'
-          ? plugin.reverse.bind(plugin)
-          : plugin.process.bind(plugin);
+        streamContext?.signal.throwIfAborted();
+        const ctx = makeContext(requestId, {}, logger, span, streamContext?.signal);
+        if (reverse && typeof plugin.reverse !== 'function') {
+          throw new Error(`[PipeX] Plugin ${plugin.name} is not reversible`);
+        }
+        const fn = reverse ? plugin.reverse!.bind(plugin) : plugin.process.bind(plugin);
         
-        const out = await withRetry(() => fn(chunk, ctx), plugin.retryOptions, logger);
+        const out = await withRetry(
+          () => fn(chunk, ctx),
+          plugin.retryOptions,
+          logger,
+          { signal: streamContext?.signal, limits: streamContext?.limits },
+        );
         emitProgress?.(out.length);
         span?.addEvent('processed', { bytes: out.length });
         cb(null, out);
@@ -249,8 +337,21 @@ export function buildFallbackTransform(
 
         if (dlq && dlq.writable) {
           logger?.warn(`[PipeX] Diverting failed chunk to DLQ`, { requestId, plugin: plugin.name });
-          dlq.write(chunk);
-          cb(); // Drop the chunk from the main pipeline but don't crash
+          try {
+            if (!dlq.write(chunk)) await new Promise<void>((resolve, reject) => {
+              const onDrain = () => { cleanup(); resolve(); };
+              const onError = (writeError: Error) => { cleanup(); reject(writeError); };
+              const cleanup = () => {
+                dlq.off('drain', onDrain);
+                dlq.off('error', onError);
+              };
+              dlq.once('drain', onDrain);
+              dlq.once('error', onError);
+            });
+            cb(error);
+          } catch (dlqError) {
+            cb(dlqError as Error);
+          }
         } else {
           cb(error);
         }
@@ -287,13 +388,38 @@ export function buildTransformChain(
   logger?: Logger,
   tracer?: Tracer,
   dlq?:    Writable,
-): (Transform | PackrStream | GuardedUnpackrStream)[] {
+  streamContext?: StreamPluginContext,
+): (Duplex | Transform | PackrStream | GuardedUnpackrStream)[] {
   const ordered = reverse ? [...plugins].reverse() : plugins;
-  return ordered.map(plugin =>
-    hasStreamSupport(plugin)
-      ? plugin.createStream(mode)
-      : buildFallbackTransform(plugin, reverse, onProgress, logger, tracer, dlq)
-  );
+  return ordered.flatMap((plugin, index) => {
+    const transform = hasStreamSupport(plugin)
+      ? plugin.createStream(mode, streamContext)
+      : buildFallbackTransform(plugin, reverse, onProgress, logger, tracer, dlq, streamContext);
+    const limit = buildByteLimitTransform(
+      streamContext?.limits.maxOutputBytes ?? DEFAULT_LIMITS.maxOutputBytes,
+      `output after plugin ${plugin.name}#${index}`,
+    );
+    if (!hasStreamSupport(plugin)) return [transform, limit];
+
+    const span = tracer?.startSpan(`plugin:${plugin.name}`, { requestId: streamContext?.requestId ?? 'stream' } as ProcessorContext);
+    const observe = new Transform({
+      transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
+        onProgress?.(chunk.length);
+        span?.addEvent('processed', { bytes: chunk.length });
+        cb(null, chunk);
+      },
+      final(cb) {
+        span?.end();
+        cb();
+      },
+      destroy(error, cb) {
+        if (error) span?.setAttribute('error', true);
+        span?.end();
+        cb(error);
+      },
+    });
+    return [transform, observe, limit];
+  });
 }
 
 // ─── Central pipeline runner ──────────────────────────────────────────────────
@@ -304,28 +430,44 @@ export function buildTransformChain(
  */
 export async function runPipeline(
   source:      Readable,
-  transforms:  (Transform | PackrStream | GuardedUnpackrStream)[],
+  transforms:  (Duplex | Transform | PackrStream | GuardedUnpackrStream)[],
   destination: Writable,
+  options?: { signal?: AbortSignal },
 ): Promise<void> {
   await (pipeline as (...args: unknown[]) => Promise<void>)(
-    source, ...transforms, destination
+    source, ...transforms, destination, options ?? {}
   );
 }
 
 // ─── Path safety ──────────────────────────────────────────────────────────────
 
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+
+function assertWithinRoot(target: string, allowedRoot: string): void {
+  const relative = path.relative(allowedRoot, target);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error('[PipeX] Path is outside the allowed root');
+  }
+}
 
 export function assertExists(inputPath: string, allowedRoot?: string): string {
   const abs = path.resolve(inputPath);
-  if (allowedRoot) {
-    const root = path.resolve(allowedRoot);
-    const safe = root.endsWith(path.sep) ? root : root + path.sep;
-    if (!abs.startsWith(safe) && abs !== root) {
-      throw new Error(`[PipeX] Path traversal denied: "${abs}" outside root "${root}"`);
-    }
-  }
   if (!existsSync(abs)) throw new Error(`[PipeX] File not found: ${abs}`);
-  return abs;
+  const root = realpathSync.native(path.resolve(allowedRoot ?? process.cwd()));
+  const canonical = realpathSync.native(abs);
+  assertWithinRoot(canonical, root);
+  return canonical;
+}
+
+export function resolveOutputPath(outputPath: string, allowedRoot?: string): string {
+  const root = realpathSync.native(path.resolve(allowedRoot ?? process.cwd()));
+  const absolute = path.resolve(outputPath);
+  const parent = realpathSync.native(path.dirname(absolute));
+  assertWithinRoot(parent, root);
+  const candidate = path.join(parent, path.basename(absolute));
+  if (existsSync(candidate)) {
+    assertWithinRoot(realpathSync.native(candidate), root);
+  }
+  return candidate;
 }

@@ -19,7 +19,7 @@ import {
   buildManifest,
   isManifest,
 } from '../core.js';
-import type { EngineResult, PipeXManifest } from '../types.js';
+import type { EngineResult, PipeXManifest, OperationOptions } from '../types.js';
 
 export class BinaryController {
   readonly #engine: DataEngine;
@@ -34,7 +34,9 @@ export class BinaryController {
    */
   pack(data: unknown): Buffer {
     try {
-      return PACKR.pack(data) as Buffer;
+      const packed = PACKR.pack(data) as Buffer;
+      if (packed.length > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Packed input exceeds configured limit');
+      return packed;
     } catch (err: unknown) {
       throw new Error(`[PipeX] binary.pack failed: ${(err as Error).message}`);
     }
@@ -45,6 +47,7 @@ export class BinaryController {
    */
   unpack<T = unknown>(input: Buffer | Uint8Array): T {
     try {
+      if (input.byteLength > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Serialized input exceeds configured limit');
       return UNPACKR.unpack(input as Buffer) as T;
     } catch (err: unknown) {
       throw new Error(`[PipeX] binary.unpack failed: ${(err as Error).message}`);
@@ -55,7 +58,8 @@ export class BinaryController {
    * Run input through the full plugin pipeline.
    * Returns an EngineResult that carries originalType so undo() can round-trip.
    */
-  async run(input: unknown): Promise<EngineResult> {
+  async run(input: unknown, options: OperationOptions = {}): Promise<EngineResult> {
+    const signal = this.#engine.createOperationSignal(options);
     const requestId    = this.#engine.startRequest({ operation: 'run' });
     const startTime    = Date.now();
     const originalType = detectType(input);
@@ -73,7 +77,14 @@ export class BinaryController {
       throw err;
     }
 
-    let data = toBuffer(input);
+    let data: Buffer;
+    try {
+      data = toBuffer(input);
+      if (data.length > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Input exceeds configured limit');
+    } catch (error) {
+      this.#engine.emitError(error, requestId);
+      throw error;
+    }
     const metrics: Record<string, number> = {};
 
     try {
@@ -83,8 +94,9 @@ export class BinaryController {
         pSpan?.setAttribute('mode', 'process');
         
         try {
-          const ctx = makeContext(requestId, { originalType }, this.#engine.logger, pSpan);
-          data = await withRetry(() => plugin.process(data, ctx), plugin.retryOptions, this.#engine.logger);
+          const ctx = makeContext(requestId, { originalType }, this.#engine.logger, pSpan, signal);
+          data = await withRetry(() => plugin.process(data, ctx), plugin.retryOptions, this.#engine.logger, { signal, limits: this.#engine.limits });
+          if (data.length > this.#engine.limits.maxOutputBytes) throw new Error(`[PipeX] Plugin output exceeds configured limit`);
         } catch (e) {
           pSpan?.setAttribute('error', true);
           throw e;
@@ -148,21 +160,24 @@ export class BinaryController {
 
     // If it looks like a manifest-prepended buffer, extract it for validation
     if (Buffer.isBuffer(inputOrResult) && inputOrResult.length > 0) {
+      let manifest: PipeXManifest | undefined;
       try {
-        const { manifest, data: actualData } = this.unpackWithManifest(inputOrResult);
+        const parsed = this.unpackWithManifest(inputOrResult);
+        manifest = parsed.manifest;
+        const actualData = parsed.data;
         data = actualData as Buffer;
-        
-        // Validation: Warn if the current engine's plugin list doesn't match the manifest
-        const currentPipeline = this.#engine.plugins.map(p => `${p.name}@${p.version}`);
-        const manifestPipeline = manifest.plugins;
-        
-        if (JSON.stringify(currentPipeline) !== JSON.stringify(manifestPipeline)) {
-          const warnMsg = `[PipeX] Manifest mismatch: Engine has [${currentPipeline}], buffer was packed with [${manifestPipeline}]`;
-          this.#engine.logger?.warn(warnMsg, { requestId });
-          console.warn(warnMsg);
-        }
       } catch {
         // Not a manifest buffer, continue with raw input
+      }
+      if (manifest) {
+        const currentPipeline = this.#engine.plugins.map(p => `${p.name}@${p.version}`);
+        if (JSON.stringify(currentPipeline) !== JSON.stringify(manifest.plugins)) {
+          const error = new Error('[PipeX] Manifest plugin chain does not match the configured engine');
+          this.#engine.emitError(error, requestId);
+          span?.setAttribute('error', true);
+          span?.end();
+          throw error;
+        }
       }
     }
 
@@ -221,7 +236,10 @@ export class BinaryController {
    * Mirrors what file.pack writes to disk — useful for in-memory transport.
    */
   packWithManifest(data: unknown): Buffer {
-    const manifest = buildManifest(this.#engine.plugins);
+    if (this.#engine.plugins.length > 0) {
+      throw new Error('[PipeX] packWithManifest is serialization-only; use binary.run for plugin transforms');
+    }
+    const manifest = buildManifest([]);
     const mFrame   = PACKR.pack(manifest);
     const dFrame   = PACKR.pack(data);
     return Buffer.concat([mFrame, dFrame]);
@@ -233,9 +251,11 @@ export class BinaryController {
    * the pipeline that produced the buffer before consuming data.
    */
   unpackWithManifest<T = unknown>(input: Buffer): { manifest: PipeXManifest; data: T } {
+    if (input.length > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Serialized input exceeds configured limit');
     const frames: unknown[] = [];
     try {
       UNPACKR.unpackMultiple(input, (value) => {
+        if (frames.length >= this.#engine.limits.maxFrames) throw new Error('[PipeX] Frame count exceeds configured limit');
         frames.push(value);
       });
     } catch (err: unknown) {

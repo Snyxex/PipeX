@@ -10,7 +10,7 @@ Unlike simple pipe utilities, PipeX is a **Data Highway** that ensures your data
 
 - **Standard Plugin Library:** Built-in support for Gzip, Brotli, AES-256-GCM, HMAC, and more.
 - **Always-on Validation:** Integrated Zod support for schema-driven data integrity.
-- **Manifest System:** Every packed package is self-describing, allowing for "self-healing" decompression/decryption.
+- **Manifest System:** Object-stream packages carry a validated format manifest. `pack()` is serialization-only; use `process()`/`stream.pipe()` for encryption and compression.
 - **Multi-Controller API:** Specialized interfaces for **File**, **Binary** (In-Memory), and **Live Streams**.
 - **High Performance:** Powered by `msgpackr` for binary serialization and Node.js native streams.
 - **Worker Support:** Offload heavy CPU tasks to a persistent worker pool with one line of code.
@@ -70,7 +70,7 @@ Ideal for small-to-medium datasets that fit in memory.
 ### 📂 File Controller
 Designed for massive files with zero memory overhead.
 - `engine.file.process(src, dst)`: Stream data through the pipeline to a file.
-- `engine.file.pack(src, dst)`: Pack a file with a PipeX Manifest header.
+- `engine.file.pack(src, dst)`: Pack a file with a PipeX Manifest header (serialization-only).
 
 ### 🌊 Stream Controller
 Low-level primitives for live data streams (TCP, WebSockets, etc.).

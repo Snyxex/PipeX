@@ -36,9 +36,14 @@ export class CompressionPlugin extends BasePlugin {
 
   constructor(protected override options: CompressionOptions) {
     super(options);
+    if (!(options.type in TYPE_BYTE_MAP)) throw new Error('[PipeX] Compression: unknown type');
+    if (options.level !== undefined && (!Number.isInteger(options.level) || options.level < 0 || options.level > 11)) {
+      throw new Error('[PipeX] Compression: level must be an integer between 0 and 11');
+    }
   }
 
   public override async process(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
+    if (data.length > 256 * 1024 * 1024) throw new Error('[PipeX] Compression input exceeds 256 MiB');
     const { type, level } = this.options;
     const header = Buffer.from([TYPE_BYTE_MAP[type]]);
 
@@ -63,8 +68,17 @@ export class CompressionPlugin extends BasePlugin {
     const type = ID_TO_TYPE[typeId];
     const payload = data.subarray(1);
 
-    if (type === 'gzip')   return gunzipSync(payload);
-    if (type === 'brotli') return brotliDecompressSync(payload);
+    if (type === 'gzip') {
+      const out = gunzipSync(payload);
+      if (out.length > 256 * 1024 * 1024) throw new Error('[PipeX] Decompressed output exceeds 256 MiB');
+      return out;
+    }
+    if (type === 'brotli') {
+      const out = brotliDecompressSync(payload);
+      if (out.length > 256 * 1024 * 1024) throw new Error('[PipeX] Decompressed output exceeds 256 MiB');
+      return out;
+    }
+    if (type !== 'none') throw new Error('[PipeX] Compression: unknown type');
     return payload;
   }
 
@@ -106,8 +120,10 @@ export class CompressionPlugin extends BasePlugin {
           let payload = chunk;
           if (!headerSent) {
             headerSent = true;
+            if (chunk.length < 1) return cb(new Error('[PipeX] Stream decompression: packet too short'));
             const typeId = chunk.readUInt8(0);
             const detectedType = ID_TO_TYPE[typeId];
+            if (!detectedType) return cb(new Error('[PipeX] Stream decompression: unknown type'));
             payload = chunk.subarray(1);
 
             decompressor = detectedType === 'gzip'

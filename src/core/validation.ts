@@ -54,10 +54,21 @@ export class ValidationPlugin extends BasePlugin {
   }
 
   public createStream(): Transform {
+    const chunks: Buffer[] = [];
+    let total = 0;
     return new Transform({
       transform(chunk, _enc, cb) {
-        cb(null, chunk);
-      }
+        total += chunk.length;
+        if (total > 64 * 1024 * 1024) return cb(new Error('[PipeX] Validation input exceeds 64 MiB'));
+        chunks.push(chunk);
+        cb();
+      },
+      flush: (cb) => {
+        try {
+          this.validate(Buffer.concat(chunks));
+          cb(null, Buffer.concat(chunks));
+        } catch (error) { cb(error as Error); }
+      },
     });
   }
 }

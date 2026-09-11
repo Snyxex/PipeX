@@ -37,8 +37,8 @@ export interface PipeXManifest {
 ```
 
 ### Why it matters:
-- **Self-Healing:** When you call `undo()`, PipeX reads the manifest first. It can warn you if your current engine version or plugin configuration differs from what was used to pack the data.
-- **Security:** It prevents trying to decrypt or decompress data with an incompatible pipeline, which could lead to crashes or corrupted memory.
+- **Validation:** Unpack rejects malformed manifests and plugin-chain mismatches before emitting data.
+- **Scope:** `pack()` serializes object frames and does not apply encryption or compression. Apply plugins through `process()` or `stream.pipe()` before using a separate transport format.
 
 ---
 

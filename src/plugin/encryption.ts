@@ -28,6 +28,7 @@ const ID_TO_ALGO: Record<number, EncryptionAlgorithm> = {
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 const HEADER_LENGTH = 1 + IV_LENGTH + TAG_LENGTH; // [algo][iv][tag]
+const MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 
 /**
  * EncryptionPlugin — Standard library plugin for AES-GCM and ChaCha20-Poly1305.
@@ -39,12 +40,16 @@ export class EncryptionPlugin extends BasePlugin {
 
   constructor(protected override options: EncryptionOptions) {
     super(options);
+    if (!(options.algorithm in ALGO_MAP) || !Buffer.isBuffer(options.key)) {
+      throw new Error('[PipeX] Encryption: invalid algorithm or key');
+    }
     if (options.key.length !== 32) {
       throw new Error('[PipeX] Encryption: Key must be 32 bytes');
     }
   }
 
   public override async process(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
+    if (data.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] Encryption input exceeds 256 MiB');
     const { algorithm, key } = this.options;
     const iv = randomBytes(IV_LENGTH);
     const cipher = createCipheriv(algorithm, key, iv, { authTagLength: TAG_LENGTH } as any) as CipherGCM;
@@ -62,6 +67,7 @@ export class EncryptionPlugin extends BasePlugin {
 
     const algoId = data.readUInt8(0);
     const algo = ID_TO_ALGO[algoId];
+    if (!algo) throw new Error('[PipeX] Decryption failed: unknown algorithm');
     const iv = data.subarray(1, 1 + IV_LENGTH);
     const tag = data.subarray(1 + IV_LENGTH, HEADER_LENGTH);
     const ciphertext = data.subarray(HEADER_LENGTH);
@@ -78,11 +84,13 @@ export class EncryptionPlugin extends BasePlugin {
     if (mode === 'compress') {
       const iv = randomBytes(IV_LENGTH);
       const cipher = createCipheriv(algorithm, key, iv, { authTagLength: TAG_LENGTH } as any) as CipherGCM;
-      let headerSent = false;
       const dataChunks: Buffer[] = [];
+      let total = 0;
 
       return new Transform({
         transform(chunk: Buffer, _enc, cb) {
+          total += chunk.length;
+          if (total > MAX_BUFFER_BYTES) return cb(new Error('[PipeX] Encryption stream exceeds 256 MiB'));
           dataChunks.push(cipher.update(chunk));
           cb();
         },
@@ -102,6 +110,8 @@ export class EncryptionPlugin extends BasePlugin {
       let headBuf = Buffer.alloc(0);
       let decipher: DecipherGCM | null = null;
 
+      const plaintextChunks: Buffer[] = [];
+      let totalPlaintext = 0;
       return new Transform({
         transform(chunk: Buffer, _enc, cb) {
           if (!decipher) {
@@ -109,6 +119,7 @@ export class EncryptionPlugin extends BasePlugin {
             if (headBuf.length >= HEADER_LENGTH) {
               const algoId = headBuf.readUInt8(0);
               const algo = ID_TO_ALGO[algoId];
+              if (!algo) return cb(new Error('[PipeX] Stream decryption failed: unknown algorithm'));
               const iv = headBuf.subarray(1, 1 + IV_LENGTH);
               const tag = headBuf.subarray(1 + IV_LENGTH, HEADER_LENGTH);
               
@@ -116,18 +127,21 @@ export class EncryptionPlugin extends BasePlugin {
               decipher.setAuthTag(tag);
               
               const rest = headBuf.subarray(HEADER_LENGTH);
-              if (rest.length > 0) this.push(decipher.update(rest));
+               if (rest.length > 0) { totalPlaintext += rest.length; plaintextChunks.push(decipher.update(rest)); }
               headBuf = Buffer.alloc(0);
             }
           } else {
-            this.push(decipher.update(chunk));
+            totalPlaintext += chunk.length;
+            if (totalPlaintext > MAX_BUFFER_BYTES) return cb(new Error('[PipeX] Decryption stream exceeds 256 MiB'));
+            plaintextChunks.push(decipher.update(chunk));
           }
           cb();
         },
         flush(cb: TransformCallback) {
           if (!decipher) return cb(new Error('[PipeX] Stream decryption failed: No header'));
           try {
-            this.push(decipher.final());
+            plaintextChunks.push(decipher.final());
+            this.push(Buffer.concat(plaintextChunks));
             cb();
           } catch (e) {
             cb(e as Error);

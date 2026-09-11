@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { Transform } from 'node:stream';
 import { Piscina } from 'piscina';
 import { BasePlugin } from '../core/plugin.js';
@@ -23,8 +24,11 @@ export class WorkerPoolPlugin extends BasePlugin {
 
   constructor(options: WorkerPoolOptions = {}) {
     super(options);
+    const bundledWorker = existsSync(join(__dirname, 'worker_piscina.mjs'))
+      ? join(__dirname, 'worker_piscina.mjs')
+      : join(__dirname, 'plugin', 'worker_piscina.mjs');
     this.pool = new Piscina({
-      filename: join(__dirname, 'worker_piscina.js'),
+      filename: bundledWorker,
       maxThreads: options.maxThreads,
     });
   }
@@ -32,7 +36,7 @@ export class WorkerPoolPlugin extends BasePlugin {
   public override async process(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
     // Transfer the buffer to the worker pool
     const ab = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-    const resultAb = await this.pool.run(ab, { transferList: [ab] });
+    const resultAb = await this.pool.run(ab, { transferList: [ab as ArrayBuffer] } as any);
     return Buffer.from(resultAb as ArrayBuffer);
   }
 
@@ -51,5 +55,9 @@ export class WorkerPoolPlugin extends BasePlugin {
         }
       }
     });
+  }
+
+  public async close(): Promise<void> {
+    await this.pool.destroy();
   }
 }

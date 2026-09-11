@@ -19,6 +19,7 @@ import { CompressionPlugin } from './plugin/compression.js';
 import { BenchmarkPlugin } from './plugin/performance.js';
 import { WorkerPoolPlugin } from './plugin/worker.js';
 import { ValidationPlugin } from './core/validation.js';
+import { KmsEncryptionPlugin } from './plugin/kms_encryption.js';
 
 export const Plugins = {
   Hashing: HashingPlugin,
@@ -27,7 +28,8 @@ export const Plugins = {
   Benchmark: BenchmarkPlugin,
   WorkerPool: WorkerPoolPlugin,
   Validation: ValidationPlugin,
+  KmsEncryption: KmsEncryptionPlugin,
 } as const;
 
 // Also export individually for those who prefer it
-export { HashingPlugin, EncryptionPlugin, CompressionPlugin, BenchmarkPlugin, WorkerPoolPlugin, ValidationPlugin };
+export { HashingPlugin, EncryptionPlugin, CompressionPlugin, BenchmarkPlugin, WorkerPoolPlugin, ValidationPlugin, KmsEncryptionPlugin };

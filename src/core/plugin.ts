@@ -9,7 +9,7 @@ export abstract class BasePlugin implements ProcessorPlugin {
   abstract process(data: Buffer, context: ProcessorContext): Promise<Buffer> | Buffer;
 
   // Standardmäßig ein Pass-through, falls nicht überschrieben
-  reverse(data: Buffer, context: ProcessorContext): Promise<Buffer> | Buffer {
+  reverse(data: Buffer, _context: ProcessorContext): Promise<Buffer> | Buffer {
     return data;
   }
 }

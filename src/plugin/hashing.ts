@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { Transform, type TransformCallback } from 'node:stream';
+import { Transform } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
 import type { ProcessorContext } from '../core/types.js';
 
@@ -14,6 +14,7 @@ const HASH_LENGTHS: Record<HashAlgorithm, number> = {
   'sha256': 32,
   'sha512': 64,
 };
+const MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 
 /**
  * HashingPlugin — Standard library plugin for HMAC integrity checks.
@@ -25,6 +26,7 @@ export class HashingPlugin extends BasePlugin {
 
   constructor(protected override options: HashingOptions) {
     super(options);
+    if (!(options.algorithm in HASH_LENGTHS)) throw new Error('[PipeX] Hashing: unknown algorithm');
     if (!options.secret || options.secret.length < 16) {
       throw new Error('[PipeX] Hashing: Secret must be at least 16 characters');
     }
@@ -75,15 +77,19 @@ export class HashingPlugin extends BasePlugin {
     } else {
       // Verification mode
       let buffer = Buffer.alloc(0);
+      let total = 0;
+      const verifiedChunks: Buffer[] = [];
 
       return new Transform({
         transform(chunk: Buffer, _enc, cb) {
+          total += chunk.length;
+          if (total > MAX_BUFFER_BYTES) return cb(new Error('[PipeX] HMAC stream exceeds 256 MiB'));
           buffer = Buffer.concat([buffer, chunk]);
           // Keep at least len bytes in the buffer to avoid hashing the trailing HMAC
           if (buffer.length > len) {
             const toProcess = buffer.subarray(0, buffer.length - len);
             hmac.update(toProcess);
-            this.push(toProcess);
+            verifiedChunks.push(toProcess);
             buffer = buffer.subarray(buffer.length - len);
           }
           cb();
@@ -96,6 +102,7 @@ export class HashingPlugin extends BasePlugin {
           if (!timingSafeEqual(buffer, expected)) {
             return cb(new Error('[PipeX] Hashing stream: HMAC verification failed'));
           }
+          this.push(Buffer.concat(verifiedChunks));
           cb();
         }
       });

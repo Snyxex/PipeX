@@ -12,7 +12,7 @@
 
 import { EventEmitter }         from 'node:events';
 import { randomUUID }           from 'node:crypto';
-import { Readable, Writable }   from 'node:stream';
+import { Writable }             from 'node:stream';
 import { z }                    from 'zod';
 import type { 
   ProcessorPlugin, 
@@ -22,10 +22,13 @@ import type {
   AuditRecord,
   SchemaRegistry,
   EngineConfig
+  , EngineLimits
+  , OperationOptions
 } from './types.js';
-import { FileController }       from './controllers/FileController.js';
-import { BinaryController }     from './controllers/BinaryController.js';
-import { StreamController }     from './controllers/StreamController.js';
+import { DEFAULT_LIMITS }       from './core.js';
+import { FileController }       from './controllers/Filecontroller.js';
+import { BinaryController }     from './controllers/Binarycontroller.js';
+import { StreamController }     from './controllers/Streamcontroller.js';
 
 // ─── Typed EventEmitter ───────────────────────────────────────────────────────
 
@@ -46,6 +49,9 @@ export class DataEngine extends EventEmitter {
 
   /** Register a plugin class for use in fromConfig(). */
   public static registerPlugin(name: string, pluginClass: any): void {
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name) || typeof pluginClass !== 'function') {
+      throw new Error('[PipeX] Invalid plugin registration');
+    }
     this.pluginRegistry.set(name, pluginClass);
   }
 
@@ -74,17 +80,54 @@ export class DataEngine extends EventEmitter {
   #tracer?: Tracer;
   #dlq?:    Writable;
   #auditLogger?: AuditLogger;
+  #limits: EngineLimits;
+  readonly #activeRequests = new Set<string>();
 
   // ── Controllers ─────────────────────────────────────────────────────────────
   readonly file:   FileController;
   readonly binary: BinaryController;
   readonly stream: StreamController;
 
-  constructor() {
+  constructor(limits: Partial<EngineLimits> = {}) {
     super();
+    this.#limits = { ...DEFAULT_LIMITS, ...limits };
+    this.#validateLimits(this.#limits);
     this.file   = new FileController(this);
     this.binary = new BinaryController(this);
     this.stream = new StreamController(this);
+  }
+
+  #validateLimits(limits: EngineLimits): void {
+    for (const [name, value] of Object.entries(limits)) {
+      if (!Number.isSafeInteger(value) || value < 0) {
+        throw new Error(`[PipeX] Invalid engine limit ${name}`);
+      }
+    }
+    if (limits.maxInputBytes < 1 || limits.maxOutputBytes < 1 || limits.maxFrameBytes < 1
+      || limits.maxFrames < 1 || limits.maxConcurrentOperations < 1 || limits.maxRetryAttempts < 1) {
+      throw new Error('[PipeX] Engine limits must be positive');
+    }
+  }
+
+  get limits(): Readonly<EngineLimits> {
+    return this.#limits;
+  }
+
+  setLimits(limits: Partial<EngineLimits>): this {
+    const next = { ...this.#limits, ...limits };
+    this.#validateLimits(next);
+    this.#limits = next;
+    return this;
+  }
+
+  createOperationSignal(options: OperationOptions = {}): AbortSignal {
+    const timeoutMs = options.timeoutMs ?? this.#limits.operationTimeoutMs;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
+      throw new Error('[PipeX] Invalid operation timeout');
+    }
+    const signals = options.signal ? [options.signal] : [];
+    if (timeoutMs > 0) signals.push(AbortSignal.timeout(timeoutMs));
+    return signals.length === 0 ? new AbortController().signal : AbortSignal.any(signals);
   }
 
   /** 
@@ -210,6 +253,12 @@ export class DataEngine extends EventEmitter {
 
   /** Register a plugin and return this for fluent chaining. */
   use(plugin: ProcessorPlugin): this {
+    if (!plugin || typeof plugin.name !== 'string' || plugin.name.length === 0 || plugin.name.length > 128
+      || typeof plugin.version !== 'string' || plugin.version.length === 0
+      || typeof plugin.process !== 'function') {
+      throw new Error('[PipeX] Invalid processor plugin');
+    }
+    if (this.#plugins.length >= 256) throw new Error('[PipeX] Maximum plugin count exceeded');
     this.#plugins.push(plugin);
     return this;
   }
@@ -226,15 +275,20 @@ export class DataEngine extends EventEmitter {
 
   /** Generates a requestId, emits 'start', returns the id. */
   startRequest(metadata: Record<string, unknown> = {}): string {
+    if (this.#activeRequests.size >= this.#limits.maxConcurrentOperations) {
+      throw new Error('[PipeX] Maximum concurrent operations exceeded');
+    }
     const requestId = randomUUID();
-    this.#logger?.info(`[PipeX] Request started: ${requestId}`, { requestId, ...metadata });
+    this.#activeRequests.add(requestId);
+    try { this.#logger?.info('[PipeX] Request started', { requestId, ...metadata }); } catch { /* logger isolation */ }
     this.emit('start', requestId);
     return requestId;
   }
 
   /** Emits 'end' with optional duration. */
   endRequest(requestId: string, durationMs?: number): void {
-    this.#logger?.info(`[PipeX] Request ended: ${requestId}`, { requestId, durationMs });
+    this.#activeRequests.delete(requestId);
+    try { this.#logger?.info('[PipeX] Request ended', { requestId, durationMs }); } catch { /* logger isolation */ }
     this.emit('end', requestId, durationMs);
   }
 
@@ -246,12 +300,9 @@ export class DataEngine extends EventEmitter {
   /** Normalises unknown throws → Error and emits 'error'. */
   emitError(err: unknown, requestId: string): void {
     const error = err instanceof Error ? err : new Error(String(err));
-    this.#logger?.error(`[PipeX] Request failed: ${requestId}`, { 
-      requestId, 
-      error: error.message,
-      stack: error.stack 
-    });
-    this.emit('error', error, requestId);
+    this.#activeRequests.delete(requestId);
+    try { this.#logger?.error('[PipeX] Request failed', { requestId, error: error.message }); } catch { /* logger isolation */ }
+    if (this.listenerCount('error') > 0) this.emit('error', error, requestId);
   }
 
   // ── EventEmitter typed overrides ─────────────────────────────────────────────

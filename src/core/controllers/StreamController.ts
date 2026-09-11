@@ -8,7 +8,7 @@
  * engine.stream.pipe(readable, writable) → orchestrate full pipeline
  */
 
-import { Readable, Writable, Transform, PassThrough } from 'node:stream';
+import { Readable, Writable, Transform, PassThrough, Duplex } from 'node:stream';
 import type { DataEngine }                             from '../dataEngine.js';
 import {
   buildTransformChain,
@@ -18,8 +18,10 @@ import {
   createPackrStream,
   createUnpackrStream,
   runPipeline,
+  buildByteLimitTransform,
+  buildObjectLimitTransform,
 } from '../core.js';
-import type { PipeXManifest }  from '../types.js';
+import type { OperationOptions, PipeXManifest, StreamPluginContext }  from '../types.js';
 
 
 export class StreamController {
@@ -29,6 +31,30 @@ export class StreamController {
     this.#engine = engine;
   }
 
+  #streamContext(requestId: string, signal: AbortSignal): StreamPluginContext {
+    return { requestId, signal, limits: this.#engine.limits, logger: this.#engine.logger, tracer: this.#engine.tracer };
+  }
+
+  #bridge(input: PassThrough, output: PassThrough, objectMode: boolean): Duplex {
+    const duplex = new Duplex({
+      writableObjectMode: objectMode,
+      readableObjectMode: objectMode,
+      write(chunk, encoding, callback) {
+        input.write(chunk, encoding as BufferEncoding, callback);
+      },
+      final(callback) {
+        output.once('end', callback);
+        input.end();
+      },
+      read() { /* output events push data below */ },
+    });
+    output.on('data', chunk => duplex.push(chunk));
+    output.once('end', () => duplex.push(null));
+    output.once('error', error => duplex.destroy(error));
+    input.once('error', error => duplex.destroy(error));
+    return duplex;
+  }
+
   /**
    * Returns a Writable that pumps incoming bytes through the plugin pipeline
    * (compress direction) and forwards them to `destination`.
@@ -36,17 +62,21 @@ export class StreamController {
    * @example
    * readableSource.pipe(engine.stream.into(createWriteStream('out')));
    */
-  into(destination: Writable): Writable {
+  into(destination: Writable, options: OperationOptions = {}): Writable {
+    const signal = this.#engine.createOperationSignal(options);
+    if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw byte streams');
     const requestId  = this.#engine.startRequest();
+    const context = this.#streamContext(requestId, signal);
     const transforms = buildTransformChain(
       this.#engine.plugins, 'compress', false,
       bytes => this.#engine.emitProgress(bytes, requestId),
       this.#engine.logger,
       this.#engine.tracer,
       this.#engine.dlq,
+      context,
     );
     const entry = new PassThrough();
-    runPipeline(entry, transforms, destination)
+    runPipeline(entry, [buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'), ...transforms, buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output')], destination, { signal })
       .then(() => this.#engine.endRequest(requestId))
       .catch(err => {
         this.#engine.emitError(err, requestId);
@@ -62,17 +92,21 @@ export class StreamController {
    * @example
    * readableSource.pipe(engine.stream.reverseInto(createWriteStream('restored')));
    */
-  reverseInto(destination: Writable): Writable {
+  reverseInto(destination: Writable, options: OperationOptions = {}): Writable {
+    const signal = this.#engine.createOperationSignal(options);
+    if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw byte streams');
     const requestId  = this.#engine.startRequest();
+    const context = this.#streamContext(requestId, signal);
     const transforms = buildTransformChain(
       this.#engine.plugins, 'decompress', true,
       bytes => this.#engine.emitProgress(bytes, requestId),
       this.#engine.logger,
       this.#engine.tracer,
       this.#engine.dlq,
+      context,
     );
     const entry = new PassThrough();
-    runPipeline(entry, transforms, destination)
+    runPipeline(entry, [buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'), ...transforms, buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output')], destination, { signal })
       .then(() => this.#engine.endRequest(requestId))
       .catch(err => {
         this.#engine.emitError(err, requestId);
@@ -88,12 +122,26 @@ export class StreamController {
    * @example
    * objectSource.pipe(engine.stream.pack()).pipe(tcpSocket);
    */
-  pack(): Transform {
-    const packer = createPackrStream();
-    const header = buildManifestHeaderTransform(buildManifest(this.#engine.plugins));
-    packer.pipe(header);
+  pack(options: OperationOptions = {}): Duplex {
+    const requestId = this.#engine.startRequest({ operation: 'pack' });
+    const signal = this.#engine.createOperationSignal(options);
+    const input = new PassThrough({ objectMode: true });
+    const output = new PassThrough();
+    const transforms = [
+      buildObjectLimitTransform(this.#engine.limits.maxFrames),
+      createPackrStream(),
+      buildManifestHeaderTransform(buildManifest([])),
+      buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),
+    ];
+    const duplex = this.#bridge(input, output, true);
+    runPipeline(input, transforms, output, { signal })
+      .then(() => this.#engine.endRequest(requestId))
+      .catch(error => {
+        this.#engine.emitError(error, requestId);
+        duplex.destroy(error instanceof Error ? error : new Error(String(error)));
+      });
     // Expose `header` as the readable end — callers pipe from this Transform
-    return header;
+    return duplex;
   }
 
   /**
@@ -103,13 +151,42 @@ export class StreamController {
    * @example
    * tcpSocket.pipe(engine.stream.unpack()).on('data', obj => console.log(obj));
    */
-  unpack(): Transform {
-    const unpacker = createUnpackrStream();
+  unpack(options: OperationOptions = {}): Duplex {
+    const requestId = this.#engine.startRequest({ operation: 'unpack' });
+    const signal = this.#engine.createOperationSignal(options);
+    const input = new PassThrough();
+    const output = new PassThrough({ objectMode: true });
+    const unpacker = createUnpackrStream(this.#engine.limits.maxInputBytes);
     const extract  = buildManifestExtractTransform((m: PipeXManifest) => {
-      this.#engine.emit('manifest', m);
+      const expected: string[] = [];
+      if (m.plugins.length !== expected.length || m.plugins.some((plugin, index) => plugin !== expected[index])) {
+        throw new Error('[PipeX] Manifest plugin chain does not match the configured engine');
+      }
+      this.#engine.emit('manifest', m, requestId);
     });
-    unpacker.pipe(extract);
-    return extract;
+    const validate = new Transform({
+      writableObjectMode: true,
+      readableObjectMode: true,
+      transform: (value: unknown, _encoding, callback) => {
+        try { this.#engine.validate(value); callback(null, value); }
+        catch (error) { callback(error as Error); }
+      },
+    });
+    const transforms = [
+      buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'),
+      unpacker,
+      buildObjectLimitTransform(this.#engine.limits.maxFrames),
+      extract,
+      validate,
+    ];
+    const duplex = this.#bridge(input, output, true);
+    runPipeline(input, transforms, output, { signal })
+      .then(() => this.#engine.endRequest(requestId))
+      .catch(error => {
+        this.#engine.emitError(error, requestId);
+        duplex.destroy(error instanceof Error ? error : new Error(String(error)));
+      });
+    return duplex;
   }
 
   /**
@@ -123,18 +200,26 @@ export class StreamController {
    *   createWriteStream('output.bin'),
    * );
    */
-  async pipe(source: Readable, destination: Writable, reverse = false): Promise<void> {
+  async pipe(source: Readable, destination: Writable, reverse = false, options: OperationOptions = {}): Promise<void> {
+    const signal = this.#engine.createOperationSignal(options);
+    if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw byte streams');
     const requestId  = this.#engine.startRequest();
     const mode       = reverse ? 'decompress' : 'compress';
+    const context = this.#streamContext(requestId, signal);
     const transforms = buildTransformChain(
       this.#engine.plugins, mode, reverse,
       bytes => this.#engine.emitProgress(bytes, requestId),
       this.#engine.logger,
       this.#engine.tracer,
       this.#engine.dlq,
+      context,
     );
     try {
-      await runPipeline(source, transforms, destination);
+      await runPipeline(source, [
+        buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'),
+        ...transforms,
+        buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),
+      ], destination, { signal });
       this.#engine.endRequest(requestId);
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);

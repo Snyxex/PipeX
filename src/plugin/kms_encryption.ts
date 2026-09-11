@@ -9,6 +9,7 @@ export interface KmsEncryptionOptions {
 
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
+const MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 
 /**
  * KmsEncryptionPlugin — Enterprise-grade encryption using Envelope Encryption.
@@ -25,9 +26,13 @@ export class KmsEncryptionPlugin extends BasePlugin {
 
   constructor(protected override options: KmsEncryptionOptions) {
     super(options);
+    if (!options.kms || typeof options.keyId !== 'string' || options.keyId.length === 0 || options.keyId.length > 512) {
+      throw new Error('[PipeX] KMS Encryption: invalid provider or keyId');
+    }
   }
 
   public override async process(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
+    if (data.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] KMS encryption input exceeds 256 MiB');
     const { kms, keyId } = this.options;
     
     // 1. Generate Data Key
@@ -37,8 +42,14 @@ export class KmsEncryptionPlugin extends BasePlugin {
     const iv = randomBytes(IV_LENGTH);
     const cipher = createCipheriv('aes-256-gcm', plaintext, iv, { authTagLength: TAG_LENGTH } as any) as CipherGCM;
     
-    const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
-    const tag = cipher.getAuthTag();
+    let encrypted: Buffer;
+    let tag: Buffer;
+    try {
+      encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
+      tag = cipher.getAuthTag();
+    } finally {
+      plaintext.fill(0);
+    }
     
     // 3. Assemble Packet
     const keyLenBuf = Buffer.alloc(4);
@@ -53,6 +64,9 @@ export class KmsEncryptionPlugin extends BasePlugin {
     if (data.length < 4) throw new Error('[PipeX] KMS Decryption: Packet too short');
     
     const keyLen = data.readUInt32BE(0);
+    if (keyLen < 1 || keyLen > 64 * 1024 || data.length < 4 + keyLen + IV_LENGTH + TAG_LENGTH) {
+      throw new Error('[PipeX] KMS Decryption: invalid key envelope');
+    }
     const encryptedKey = data.subarray(4, 4 + keyLen);
     const iv = data.subarray(4 + keyLen, 4 + keyLen + IV_LENGTH);
     const tag = data.subarray(4 + keyLen + IV_LENGTH, 4 + keyLen + IV_LENGTH + TAG_LENGTH);
@@ -60,11 +74,20 @@ export class KmsEncryptionPlugin extends BasePlugin {
     
     // 1. Decrypt Data Key via KMS
     const plaintext = await kms.decrypt(encryptedKey, keyId);
+    if (plaintext.length !== 32) throw new Error('[PipeX] KMS Decryption: invalid data key length');
     
     // 2. Decrypt Payload
     const decipher = createDecipheriv('aes-256-gcm', plaintext, iv, { authTagLength: TAG_LENGTH } as any) as DecipherGCM;
     decipher.setAuthTag(tag);
     
-    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    try {
+      return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    } finally {
+      plaintext.fill(0);
+    }
+  }
+
+  public createStream(_mode: 'compress' | 'decompress'): never {
+    throw new Error('[PipeX] KMS encryption is binary-only; use a framed transport for streams');
   }
 }

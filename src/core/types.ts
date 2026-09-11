@@ -1,4 +1,4 @@
-import type { Transform } from 'node:stream';
+import type { Duplex } from 'node:stream';
 import { z } from 'zod';
 
 // ─── Observability Types ──────────────────────────────────────────────────────
@@ -26,6 +26,30 @@ export interface RetryOptions {
   attempts: number;
   backoff: 'exponential' | 'fixed';
   delayMs: number;
+}
+
+export interface EngineLimits {
+  maxInputBytes: number;
+  maxOutputBytes: number;
+  maxFrameBytes: number;
+  maxFrames: number;
+  maxConcurrentOperations: number;
+  operationTimeoutMs: number;
+  maxRetryAttempts: number;
+  maxRetryDelayMs: number;
+}
+
+export interface OperationOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export interface StreamPluginContext {
+  readonly requestId: string;
+  readonly signal: AbortSignal;
+  readonly limits: Readonly<EngineLimits>;
+  readonly logger?: Logger;
+  readonly tracer?: Tracer;
 }
 
 // ─── Security & Audit Types ───────────────────────────────────────────────────
@@ -64,6 +88,7 @@ export interface EngineConfig {
 export interface ProcessorContext {
   readonly requestId: string;
   readonly timestamp: number;
+  readonly signal?: AbortSignal;
   metadata: Record<string, unknown>;
   logger?:  Logger;
   span?:    Span;
@@ -74,7 +99,7 @@ export interface ProcessorPlugin {
   readonly version: string;
   process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> | Buffer;
   reverse?(data: Buffer, ctx: ProcessorContext): Promise<Buffer> | Buffer;
-  createStream?(mode: 'compress' | 'decompress'): Transform;
+  createStream?(mode: 'compress' | 'decompress', context?: StreamPluginContext): Duplex;
   retryOptions?: RetryOptions;
 }
 
@@ -94,12 +119,15 @@ export interface PipeXManifest {
 }
 
 export function isManifest(value: unknown): value is PipeXManifest {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    '__pipex_v' in value &&
-    (value as Record<string, unknown>)['__pipex_v'] === 1
-  );
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return record['__pipex_v'] === 1
+    && Array.isArray(record['plugins'])
+    && record['plugins'].length <= 256
+    && record['plugins'].every(plugin => typeof plugin === 'string' && plugin.length <= 256)
+    && typeof record['ts'] === 'number'
+    && Number.isSafeInteger(record['ts'])
+    && record['ts'] >= 0;
 }
 
 // ─── Engine events ────────────────────────────────────────────────────────────
