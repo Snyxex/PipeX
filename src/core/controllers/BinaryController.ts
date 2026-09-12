@@ -72,6 +72,7 @@ export class BinaryController {
       this.#engine.validate(input);
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
+      this.#engine.endRequest(requestId);
       span?.setAttribute('error', true);
       span?.end();
       throw err;
@@ -83,6 +84,7 @@ export class BinaryController {
       if (data.length > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Input exceeds configured limit');
     } catch (error) {
       this.#engine.emitError(error, requestId);
+      this.#engine.endRequest(requestId);
       throw error;
     }
     const metrics: Record<string, number> = {};
@@ -110,6 +112,7 @@ export class BinaryController {
       }
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
+      this.#engine.endRequest(requestId);
       span?.setAttribute('error', true);
       span?.end();
       throw err;
@@ -158,6 +161,15 @@ export class BinaryController {
     const requestId  = this.#engine.startRequest({ operation: 'undo', originalType: origType });
     const span = this.#engine.tracer?.startSpan('binary:undo', { requestId } as any);
 
+    if (data.length > this.#engine.limits.maxInputBytes) {
+      const error = new Error('[PipeX] Undo input exceeds configured limit');
+      this.#engine.emitError(error, requestId);
+      this.#engine.endRequest(requestId);
+      span?.setAttribute('error', true);
+      span?.end();
+      throw error;
+    }
+
     // If it looks like a manifest-prepended buffer, extract it for validation
     if (Buffer.isBuffer(inputOrResult) && inputOrResult.length > 0) {
       let manifest: PipeXManifest | undefined;
@@ -174,6 +186,7 @@ export class BinaryController {
         if (JSON.stringify(currentPipeline) !== JSON.stringify(manifest.plugins)) {
           const error = new Error('[PipeX] Manifest plugin chain does not match the configured engine');
           this.#engine.emitError(error, requestId);
+          this.#engine.endRequest(requestId);
           span?.setAttribute('error', true);
           span?.end();
           throw error;
@@ -191,6 +204,7 @@ export class BinaryController {
         try {
           const ctx = makeContext(requestId, { originalType: origType }, this.#engine.logger, pSpan);
           data = await withRetry(() => plugin.reverse!(data, ctx), plugin.retryOptions, this.#engine.logger);
+          if (data.length > this.#engine.limits.maxOutputBytes) throw new Error('[PipeX] Plugin output exceeds configured limit');
         } catch (e) {
           pSpan?.setAttribute('error', true);
           throw e;
@@ -202,18 +216,29 @@ export class BinaryController {
       }
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
+      this.#engine.endRequest(requestId);
       span?.setAttribute('error', true);
       span?.end();
       throw err;
     }
 
-    const restored = fromBuffer(data, origType) as T;
+    let restored: T;
+    try {
+      restored = fromBuffer(data, origType) as T;
+    } catch (err: unknown) {
+      this.#engine.emitError(err, requestId);
+      this.#engine.endRequest(requestId);
+      span?.setAttribute('error', true);
+      span?.end();
+      throw err;
+    }
 
     // Core Output Validation
     try {
       this.#engine.validate(restored);
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
+      this.#engine.endRequest(requestId);
       span?.setAttribute('error', true);
       span?.end();
       throw err;
@@ -242,6 +267,9 @@ export class BinaryController {
     const manifest = buildManifest([]);
     const mFrame   = PACKR.pack(manifest);
     const dFrame   = PACKR.pack(data);
+    if (mFrame.length + dFrame.length > this.#engine.limits.maxInputBytes) {
+      throw new Error('[PipeX] Serialized input exceeds configured limit');
+    }
     return Buffer.concat([mFrame, dFrame]);
   }
 

@@ -60,7 +60,7 @@ export class KmsEncryptionPlugin extends BasePlugin {
 
   public override async reverse(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
     const { kms, keyId } = this.options;
-    
+    if (data.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] KMS decryption input exceeds 256 MiB');
     if (data.length < 4) throw new Error('[PipeX] KMS Decryption: Packet too short');
     
     const keyLen = data.readUInt32BE(0);
@@ -81,7 +81,9 @@ export class KmsEncryptionPlugin extends BasePlugin {
     decipher.setAuthTag(tag);
     
     try {
-      return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      const restored = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      if (restored.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] KMS decryption output exceeds 256 MiB');
+      return restored;
     } finally {
       plaintext.fill(0);
     }

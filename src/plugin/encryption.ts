@@ -127,7 +127,11 @@ export class EncryptionPlugin extends BasePlugin {
               decipher.setAuthTag(tag);
               
               const rest = headBuf.subarray(HEADER_LENGTH);
-               if (rest.length > 0) { totalPlaintext += rest.length; plaintextChunks.push(decipher.update(rest)); }
+              if (rest.length > 0) {
+                totalPlaintext += rest.length;
+                if (totalPlaintext > MAX_BUFFER_BYTES) return cb(new Error('[PipeX] Decryption stream exceeds 256 MiB'));
+                plaintextChunks.push(decipher.update(rest));
+              }
               headBuf = Buffer.alloc(0);
             }
           } else {
