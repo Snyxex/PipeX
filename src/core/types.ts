@@ -100,6 +100,7 @@ export interface EngineConfig {
   logger?: Logger;
   tracer?: Tracer;
   auditLogger?: AuditLogger;
+  /** Optional caller-owned failure sink; `dlq` is retained for compatibility. */
   dlq?: Writable;
   schema?: z.ZodType<any>;
   schemaRegistry?: SchemaRegistry;

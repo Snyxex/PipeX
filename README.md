@@ -111,7 +111,7 @@ The local `worker-pool` plugin executes caller-owned worker module exports with
 bounded threads, queue admission, task deadlines, and deterministic shutdown.
 See [Local worker pools](./docs/enterprise.md#local-worker-pools).
 
-`fromConfig()` also accepts `limits`, `logger`, `tracer`, `auditLogger`, `dlq`, `schema`, and `schemaRegistry`. Integration objects are validated immediately so configuration mistakes fail during startup.
+`fromConfig()` also accepts `limits`, `logger`, `tracer`, `auditLogger`, `dlq`, `schema`, and `schemaRegistry`. `dlq` is the compatibility name for an optional caller-provided failure sink; PipeX does not persist or replay its contents. Integration objects are validated immediately so configuration mistakes fail during startup.
 
 Register a custom plugin with `DataEngine.registerPlugin('redact', RedactPlugin)`.
 
@@ -140,7 +140,12 @@ Plugins without `createStream()` use a chunk-based fallback. They must be safe t
 
 ## Operational hooks
 
-PipeX supports structured logging, audit logging, tracing, progress events, bounded retries, deadlines, concurrency limits, and a writable dead-letter stream. Observer callback failures are isolated from data processing.
+PipeX supports structured logging, audit logging, tracing, progress events,
+bounded retries, deadlines, concurrency limits, and an optional caller-provided
+failure sink. The existing `dlq`/`setDlq()` names remain supported for
+compatibility. See [Failure-sink semantics](./docs/enterprise.md#retries-and-caller-provided-failure-sink)
+before routing potentially sensitive chunks. Observer callback failures are
+isolated from data processing.
 
 ```ts
 engine.setLogger(logger).setAuditLogger(auditLogger).on('error', (error, requestId) => {

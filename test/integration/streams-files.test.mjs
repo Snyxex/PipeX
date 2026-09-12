@@ -267,6 +267,68 @@ test('cancellation removes listeners while a failed chunk waits for DLQ backpres
   dlq.destroy();
 });
 
+test('caller-owned failure sink has no replay and preserves backpressure and sink errors', { timeout: 10_000 }, async () => {
+  const pluginFailure = new Error('plugin failure');
+  const engine = new DataEngine().use({
+    name: 'always-fails',
+    version: '1.0.0',
+    process() { throw pluginFailure; },
+  });
+  const destination = () => new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+
+  await assert.rejects(
+    engine.stream.pipe(Readable.from([Buffer.from('not-retained')]), destination()),
+    error => error === pluginFailure,
+  );
+
+  const received = [];
+  let releaseWrite;
+  let markWriteStarted;
+  const writeStarted = new Promise(resolve => { markWriteStarted = resolve; });
+  const sink = new Writable({
+    highWaterMark: 1,
+    write(chunk, _encoding, callback) {
+      received.push(Buffer.from(chunk));
+      releaseWrite = callback;
+      markWriteStarted();
+    },
+  });
+  engine.setDlq(sink);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(received, [], 'a newly attached sink must not receive earlier failures');
+
+  let operationSettled = false;
+  const operation = engine.stream.pipe(
+    Readable.from([Buffer.from('current-failure')]),
+    destination(),
+    false,
+    { timeoutMs: 0 },
+  );
+  void operation.then(
+    () => { operationSettled = true; },
+    () => { operationSettled = true; },
+  );
+  await writeStarted;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(operationSettled, false, 'operation must wait for failure-sink backpressure');
+  releaseWrite();
+  await assert.rejects(operation, error => error === pluginFailure);
+  assert.deepEqual(received.map(chunk => chunk.toString()), ['current-failure']);
+  sink.destroy();
+
+  const sinkFailure = new Error('failure sink unavailable');
+  const failingSink = new Writable({
+    highWaterMark: 1,
+    write(_chunk, _encoding, callback) { callback(sinkFailure); },
+  });
+  engine.setDlq(failingSink);
+  await assert.rejects(
+    engine.stream.pipe(Readable.from([Buffer.from('sink-error')]), destination(), false, { timeoutMs: 0 }),
+    error => error === sinkFailure,
+  );
+  failingSink.destroy();
+});
+
 test('source errors retain identity, destroy the destination, and report once', async () => {
   const failure = new Error('source failed');
   async function* chunks() {

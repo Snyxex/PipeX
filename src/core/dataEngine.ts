@@ -157,12 +157,13 @@ export class DataEngine extends EventEmitter {
     return signals.length === 0 ? new AbortController().signal : AbortSignal.any(signals);
   }
 
-  /** 
-   * Set a Dead Letter Queue (DLQ) stream. 
-   * When a plugin fails and retries are exhausted, the original chunk 
-   * will be written to this stream instead of crashing the pipeline.
-   * 
-   * @param stream The writable stream to use as a DLQ.
+  /**
+   * Set the optional, caller-owned failure sink (legacy DLQ terminology).
+   * A failed fallback-transform chunk is written after retries are exhausted;
+   * the operation still rejects. PipeX does not persist, replay, end, or own
+   * the supplied Writable.
+   *
+   * @param stream The caller-provided Writable used as a failure sink.
    */
   setDlq(stream: Writable): this {
     if (!stream || typeof stream.write !== 'function') throw new Error('[PipeX] DLQ must be a writable stream');
@@ -170,7 +171,7 @@ export class DataEngine extends EventEmitter {
     return this;
   }
 
-  /** The current DLQ stream, if any. */
+  /** The current caller-provided failure sink, if any. */
   get dlq(): Writable | undefined {
     return this.#dlq;
   }

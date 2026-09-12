@@ -60,7 +60,7 @@ engine.on('error', (error, requestId) => logger.error({ requestId, error }, 'Pip
 
 Logger and event-listener exceptions are isolated from transformation work. Audit logging is awaited and may fail the caller after transformation completion; operate the audit sink accordingly.
 
-## Retries and dead-letter output
+## Retries and caller-provided failure sink
 
 ```ts
 class RemotePlugin extends BasePlugin {
@@ -73,7 +73,28 @@ class RemotePlugin extends BasePlugin {
 engine.setDlq(createWriteStream('./var/pipex.dlq', { flags: 'a', mode: 0o600 }));
 ```
 
-Retries are capped by engine limits and honor cancellation. The dead-letter stream receives failed chunks only after retry exhaustion. Protect and monitor it like any other potentially sensitive data sink.
+Retries are capped by engine limits and honor cancellation. `dlq` and
+`setDlq()` are retained compatibility names for an optional failure sink; the
+value is always a `Writable` created and owned by the caller. PipeX does not
+create storage, serialize records, end the stream, retain failed chunks for
+later delivery, replay failures, manage jobs, or schedule delivery attempts.
+
+For chunk-independent fallback transforms, PipeX writes the original failed
+chunk once after plugin retries are exhausted and then rejects the operation
+with the plugin error. A `false` result from `write()` pauses completion until
+`drain`. Sink errors and premature closure fail the operation, and cancellation
+removes the temporary `drain`, `error`, and abort listeners. Native plugin
+streams manage their own failure semantics and do not use this fallback hook.
+
+The sink receives raw input bytes, not a redacted error envelope. Those bytes
+may contain plaintext, credentials, personal data, or other secrets. The caller
+is responsible for access control, encryption, retention, redaction, monitoring,
+stream lifecycle, and any persistence or replay policy. Structured failure
+context remains available separately through PipeX logging and error handling;
+PipeX never logs the failed chunk itself.
+
+`failureSink` may be considered later as a clearer additive alias. No rename or
+removal of `dlq`/`setDlq()` is made in the Standard Core.
 
 ## Local worker pools
 
