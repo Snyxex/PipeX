@@ -7,9 +7,10 @@
   "type": "module",
   "sideEffects": false,
   "scripts": {
-    "test": "npm run typecheck && npm run build && npm run test:unit && npm run test:security",
+    "test": "npm run typecheck && npm run build && npm run test:unit && npm run test:security && npm run test:package",
     "test:unit": "node --test --test-concurrency=1 test/unit/*.test.mjs",
     "test:security": "node test/hardening.test.mjs",
+    "test:package": "npm run build && node --test test/package/*.test.mjs",
     "test:hardening": "npm run test:security",
     "test:performance": "npm run build && node --test test/performance/*.test.mjs",
     "typecheck": "npm run typecheck:prod",
@@ -29,6 +30,7 @@
   ],
   "author": "Snyxex",
   "license": "MIT",
+  "packageManager": "npm@11.16.0",
   "engines": {
     "node": ">=20.19.0"
   },
@@ -52,5 +54,8 @@
       "import": "./dist/index.mjs"
     }
   },
-  "files": ["dist", "LICENSE", "README.md", "docs"]
+  "files": ["dist", "LICENSE", "README.md", "docs"],
+  "allowScripts": {
+    "msgpackr-extract@3.0.4": true
+  }
 }
