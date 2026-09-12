@@ -33,6 +33,8 @@ export {
   PipeXError,
   UnsupportedReverseError,
   UnsupportedStreamingError,
+  WorkerPoolClosedError,
+  WorkerTaskError,
 } from './core/errors.js';
 export type { PipeXErrorCode } from './core/errors.js';
 

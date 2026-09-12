@@ -3,7 +3,9 @@ export type PipeXErrorCode =
   | 'UNSUPPORTED_STREAMING'
   | 'OPERATION_ABORTED'
   | 'OPERATION_TIMEOUT'
-  | 'KMS_PROVIDER_FAILURE';
+  | 'KMS_PROVIDER_FAILURE'
+  | 'WORKER_POOL_CLOSED'
+  | 'WORKER_TASK_FAILURE';
 
 export class PipeXError extends Error {
   public override readonly name: string = 'PipeXError';
@@ -50,5 +52,19 @@ export class KmsProviderError extends PipeXError {
   public override readonly name: string = 'KmsProviderError';
   constructor(public readonly operation: 'generateDataKey' | 'decrypt', options?: ErrorOptions) {
     super('KMS_PROVIDER_FAILURE', `[PipeX] KMS ${operation} failed`, options);
+  }
+}
+
+export class WorkerPoolClosedError extends PipeXError {
+  public override readonly name: string = 'WorkerPoolClosedError';
+  constructor() {
+    super('WORKER_POOL_CLOSED', '[PipeX] Worker pool is closed');
+  }
+}
+
+export class WorkerTaskError extends PipeXError {
+  public override readonly name: string = 'WorkerTaskError';
+  constructor(public readonly taskName: string, options?: ErrorOptions) {
+    super('WORKER_TASK_FAILURE', `[PipeX] Worker task ${taskName} failed`, options);
   }
 }

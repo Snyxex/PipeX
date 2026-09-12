@@ -1,63 +1,155 @@
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
-import { Transform } from 'node:stream';
+import { Transform, type TransformCallback } from 'node:stream';
 import { Piscina } from 'piscina';
 import { BasePlugin } from '../core/plugin.js';
-import type { ProcessorContext } from '../core/types.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
+import {
+  OperationAbortedError,
+  OperationTimeoutError,
+  UnsupportedReverseError,
+  WorkerPoolClosedError,
+  WorkerTaskError,
+} from '../core/errors.js';
 
 export interface WorkerPoolOptions {
+  /** Absolute path or file URL to a caller-owned ESM/CJS worker module. */
+  filename: string | URL;
+  /** Export used for forward processing. Omit to use the worker's default export. */
+  processName?: string;
+  /** Export used for reverse processing. When omitted, reverse is unsupported. */
+  reverseName?: string;
   maxThreads?: number;
+  /** Maximum queued tasks. Defaults to 64. */
+  maxQueue?: number;
+  /** Per-task timeout in milliseconds. Zero disables the plugin-level timeout. */
+  taskTimeoutMs?: number;
+  /** Grace period used by Piscina when closing the pool. Defaults to 30 seconds. */
+  closeTimeoutMs?: number;
 }
 
-/**
- * WorkerPoolPlugin — Offloads heavy CPU tasks to a persistent warm worker pool using Piscina.
- */
+function validateInteger(value: number | undefined, name: string, allowZero = false): void {
+  if (value === undefined) return;
+  if (!Number.isSafeInteger(value) || value < (allowZero ? 0 : 1)) {
+    throw new Error(`[PipeX] Worker pool ${name} must be ${allowZero ? 'a non-negative' : 'a positive'} integer`);
+  }
+}
+
+function abortError(signal: AbortSignal): OperationAbortedError | OperationTimeoutError {
+  return signal.reason instanceof Error && signal.reason.name === 'TimeoutError'
+    ? new OperationTimeoutError({ cause: signal.reason })
+    : new OperationAbortedError({ cause: signal.reason });
+}
+
+/** Runs caller-owned CPU transforms in a bounded, persistent Piscina pool. */
 export class WorkerPoolPlugin extends BasePlugin {
   public readonly name = 'worker-pool';
-  public readonly version = '3.0.0';
+  public readonly version = '4.0.0';
+  readonly #pool: Piscina<ArrayBuffer, ArrayBuffer | Uint8Array>;
+  readonly #processName?: string;
+  readonly #reverseName?: string;
+  readonly #taskTimeoutMs: number;
+  readonly #reversible: boolean;
+  #closed = false;
 
-  private pool: Piscina;
-
-  constructor(options: WorkerPoolOptions = {}) {
+  constructor(options: WorkerPoolOptions) {
     super(options);
-    const bundledWorker = existsSync(join(__dirname, 'worker_piscina.mjs'))
-      ? join(__dirname, 'worker_piscina.mjs')
-      : join(__dirname, 'plugin', 'worker_piscina.mjs');
-    this.pool = new Piscina({
-      filename: bundledWorker,
-      maxThreads: options.maxThreads,
-    });
-  }
-
-  public override async process(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
-    // Transfer the buffer to the worker pool
-    const ab = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-    const resultAb = await this.pool.run(ab, { transferList: [ab as ArrayBuffer] } as any);
-    return Buffer.from(resultAb as ArrayBuffer);
-  }
-
-  public override async reverse(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
-    return this.process(data, _ctx);
-  }
-
-  public createStream(): Transform {
-    return new Transform({
-      transform: async (chunk: Buffer, _enc, cb) => {
-        try {
-          const res = await this.process(chunk, {} as any);
-          cb(null, res);
-        } catch (e) {
-          cb(e as Error);
-        }
+    if (!options || !(typeof options.filename === 'string' || options.filename instanceof URL)) {
+      throw new Error('[PipeX] Worker pool requires a worker filename');
+    }
+    validateInteger(options.maxThreads, 'maxThreads');
+    validateInteger(options.maxQueue, 'maxQueue');
+    validateInteger(options.taskTimeoutMs, 'taskTimeoutMs', true);
+    validateInteger(options.closeTimeoutMs, 'closeTimeoutMs', true);
+    for (const [name, value] of [['processName', options.processName], ['reverseName', options.reverseName]] as const) {
+      if (value !== undefined && (typeof value !== 'string' || value.length === 0 || value.length > 128)) {
+        throw new Error(`[PipeX] Worker pool ${name} must be a non-empty export name`);
       }
+    }
+
+    const filename = options.filename instanceof URL ? fileURLToPath(options.filename) : options.filename;
+    this.#processName = options.processName;
+    this.#reverseName = options.reverseName;
+    this.#taskTimeoutMs = options.taskTimeoutMs ?? 0;
+    this.#reversible = Boolean(options.reverseName);
+    this.#pool = new Piscina<ArrayBuffer, ArrayBuffer | Uint8Array>({
+      filename,
+      maxThreads: options.maxThreads,
+      maxQueue: options.maxQueue ?? 64,
+      closeTimeout: options.closeTimeoutMs ?? 30_000,
     });
   }
 
-  public async close(): Promise<void> {
-    await this.pool.destroy();
+  public override get reversible(): boolean {
+    return this.#reversible;
+  }
+
+  async #run(data: Buffer, ctx: ProcessorContext, exportName?: string): Promise<Buffer> {
+    if (this.#closed) throw new WorkerPoolClosedError();
+    const maxInputBytes = ctx.limits?.maxInputBytes;
+    if (maxInputBytes !== undefined && data.length > maxInputBytes) {
+      throw new Error(`[PipeX] Worker input exceeds ${maxInputBytes} bytes`);
+    }
+
+    const taskBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+    const timeoutSignal = this.#taskTimeoutMs > 0 ? AbortSignal.timeout(this.#taskTimeoutMs) : undefined;
+    const signals = [ctx.signal, timeoutSignal].filter((signal): signal is AbortSignal => signal !== undefined);
+    const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+
+    try {
+      signal?.throwIfAborted();
+      const result = await this.#pool.run(taskBuffer, {
+        transferList: [taskBuffer],
+        signal,
+        name: exportName,
+      } as any);
+      if (!(result instanceof ArrayBuffer) && !ArrayBuffer.isView(result)) {
+        throw new Error('worker returned a non-binary value');
+      }
+      const output = result instanceof ArrayBuffer
+        ? Buffer.from(result)
+        : Buffer.from(result.buffer, result.byteOffset, result.byteLength);
+      const maxOutputBytes = ctx.limits?.maxOutputBytes;
+      if (maxOutputBytes !== undefined && output.length > maxOutputBytes) {
+        throw new Error(`worker output exceeds ${maxOutputBytes} bytes`);
+      }
+      return output;
+    } catch (error) {
+      if (signal?.aborted) throw abortError(signal);
+      if (error instanceof WorkerPoolClosedError) throw error;
+      throw new WorkerTaskError(exportName ?? 'default', { cause: error });
+    }
+  }
+
+  public override process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
+    return this.#run(data, ctx, this.#processName);
+  }
+
+  public override reverse(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
+    if (!this.#reverseName) throw new UnsupportedReverseError(`${this.name}@${this.version}`);
+    return this.#run(data, ctx, this.#reverseName);
+  }
+
+  public createStream(mode: 'compress' | 'decompress', context?: StreamPluginContext): Transform {
+    return new Transform({
+      transform: (chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) => {
+        const ctx: ProcessorContext = {
+          requestId: context?.requestId ?? 'worker-stream',
+          timestamp: Date.now(),
+          signal: context?.signal,
+          limits: context?.limits,
+          logger: context?.logger,
+          metadata: {},
+        };
+        const task = mode === 'decompress' ? this.reverse(chunk, ctx) : this.process(chunk, ctx);
+        void task.then(output => callback(null, output), error => callback(error as Error));
+      },
+    });
+  }
+
+  /** Rejects new tasks and waits for queued/running work unless force is true. */
+  public async close(options: { force?: boolean } = {}): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
+    await this.#pool.close({ force: options.force ?? false });
   }
 }

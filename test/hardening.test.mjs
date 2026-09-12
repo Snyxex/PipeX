@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { BasePlugin, DataEngine, EncryptionPlugin, HashingPlugin, CompressionPlugin, UnsupportedReverseError, WorkerPoolPlugin } from '../dist/index.mjs';
+import { BasePlugin, DataEngine, EncryptionPlugin, HashingPlugin, CompressionPlugin, UnsupportedReverseError } from '../dist/index.mjs';
 
 const collect = async (stream) => {
   const chunks = [];
@@ -211,13 +211,6 @@ const collect = async (stream) => {
   const fragments = Array.from({ length: 2048 }, (_, i) => tagged.subarray(i * Math.ceil(tagged.length / 2048), (i + 1) * Math.ceil(tagged.length / 2048)));
   const restored = await collect(Readable.from(fragments).pipe(plugin.createStream('decompress')));
   assert.deepEqual(restored, source);
-}
-
-// Built worker artifact must be loadable from the packed build.
-{
-  const plugin = new WorkerPoolPlugin({ maxThreads: 1 });
-  assert.deepEqual([...await plugin.process(Buffer.from([1, 2]), {})], [0x43, 0x40]);
-  await plugin.close();
 }
 
 console.log('hardening tests passed');

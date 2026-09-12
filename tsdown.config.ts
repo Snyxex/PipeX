@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-    entry: ['./src/index.ts', './src/plugin/worker_piscina.ts'],
+    entry: ['./src/index.ts'],
     platform: 'node',
     outDir: './dist',
     format: ['esm'],
