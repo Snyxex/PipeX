@@ -22,7 +22,7 @@ import {
   type StreamPluginContext,
   isManifest 
 } from './types.js';
-import { UnsupportedReverseError } from './errors.js';
+import { UnsupportedReverseError, UnsupportedStreamingError } from './errors.js';
 
 export { isManifest };
 
@@ -115,6 +115,11 @@ export function assertReversiblePipeline(plugins: readonly ProcessorPlugin[]): v
   if (unsupported) throw new UnsupportedReverseError(`${unsupported.name}@${unsupported.version}`);
 }
 
+export function assertStreamingPipeline(plugins: readonly ProcessorPlugin[]): void {
+  const unsupported = plugins.find(plugin => plugin.streaming === false);
+  if (unsupported) throw new UnsupportedStreamingError(`${unsupported.name}@${unsupported.version}`);
+}
+
 // ─── Buffer helpers ───────────────────────────────────────────────────────────
 
 export function detectType(input: unknown): string {
@@ -175,8 +180,9 @@ export function makeContext(
   logger?: Logger,
   span?:   Span,
   signal?: AbortSignal,
+  limits?: Readonly<EngineLimits>,
 ): ProcessorContext {
-  return { requestId, timestamp: Date.now(), metadata: extra, logger, span, signal };
+  return { requestId, timestamp: Date.now(), metadata: extra, logger, span, signal, limits };
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
@@ -324,7 +330,7 @@ export function buildFallbackTransform(
 
       try {
         streamContext?.signal.throwIfAborted();
-        const ctx = makeContext(requestId, {}, logger, span, streamContext?.signal);
+        const ctx = makeContext(requestId, {}, logger, span, streamContext?.signal, streamContext?.limits);
         if (reverse && typeof plugin.reverse !== 'function') {
           throw new Error(`[PipeX] Plugin ${plugin.name} is not reversible`);
         }
@@ -400,6 +406,7 @@ export function buildTransformChain(
   dlq?:    Writable,
   streamContext?: StreamPluginContext,
 ): (Duplex | Transform | PackrStream | GuardedUnpackrStream)[] {
+  assertStreamingPipeline(plugins);
   if (reverse) assertReversiblePipeline(plugins);
   const ordered = reverse ? [...plugins].reverse() : plugins;
   return ordered.flatMap((plugin, index) => {

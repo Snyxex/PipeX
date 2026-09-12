@@ -1,4 +1,9 @@
-export type PipeXErrorCode = 'UNSUPPORTED_REVERSE';
+export type PipeXErrorCode =
+  | 'UNSUPPORTED_REVERSE'
+  | 'UNSUPPORTED_STREAMING'
+  | 'OPERATION_ABORTED'
+  | 'OPERATION_TIMEOUT'
+  | 'KMS_PROVIDER_FAILURE';
 
 export class PipeXError extends Error {
   public override readonly name: string = 'PipeXError';
@@ -17,5 +22,33 @@ export class UnsupportedReverseError extends PipeXError {
 
   constructor(public readonly plugin: string) {
     super('UNSUPPORTED_REVERSE', `[PipeX] Plugin ${plugin} does not support reverse operations`);
+  }
+}
+
+export class UnsupportedStreamingError extends PipeXError {
+  public override readonly name: string = 'UnsupportedStreamingError';
+  constructor(public readonly plugin: string) {
+    super('UNSUPPORTED_STREAMING', `[PipeX] Plugin ${plugin} does not support stream operations`);
+  }
+}
+
+export class OperationAbortedError extends PipeXError {
+  public override readonly name: string = 'OperationAbortedError';
+  constructor(options?: ErrorOptions) {
+    super('OPERATION_ABORTED', '[PipeX] Operation aborted', options);
+  }
+}
+
+export class OperationTimeoutError extends PipeXError {
+  public override readonly name: string = 'OperationTimeoutError';
+  constructor(options?: ErrorOptions) {
+    super('OPERATION_TIMEOUT', '[PipeX] Operation timed out', options);
+  }
+}
+
+export class KmsProviderError extends PipeXError {
+  public override readonly name: string = 'KmsProviderError';
+  constructor(public readonly operation: 'generateDataKey' | 'decrypt', options?: ErrorOptions) {
+    super('KMS_PROVIDER_FAILURE', `[PipeX] KMS ${operation} failed`, options);
   }
 }

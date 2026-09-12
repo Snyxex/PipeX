@@ -19,13 +19,21 @@ export type {
   AuditRecord,
   AuditLogger,
   KmsProvider,
+  KmsRequestOptions,
   SchemaRegistry,
   EngineConfig,
 }                            from './core/types.js';
 export { isManifest }        from './core/types.js';
 
 export { BasePlugin } from './core/plugin.js';
-export { PipeXError, UnsupportedReverseError } from './core/errors.js';
+export {
+  KmsProviderError,
+  OperationAbortedError,
+  OperationTimeoutError,
+  PipeXError,
+  UnsupportedReverseError,
+  UnsupportedStreamingError,
+} from './core/errors.js';
 export type { PipeXErrorCode } from './core/errors.js';
 
 // --- Standard Plugin Library ---

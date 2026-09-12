@@ -67,9 +67,13 @@ export interface AuditLogger {
 }
 
 export interface KmsProvider {
-  encrypt(data: Buffer, keyId: string): Promise<Buffer>;
-  decrypt(data: Buffer, keyId: string): Promise<Buffer>;
-  generateDataKey(keyId: string): Promise<{ plaintext: Buffer; ciphertext: Buffer }>;
+  encrypt(data: Buffer, keyId: string, options?: KmsRequestOptions): Promise<Buffer>;
+  decrypt(data: Buffer, keyId: string, options?: KmsRequestOptions): Promise<Buffer>;
+  generateDataKey(keyId: string, options?: KmsRequestOptions): Promise<{ plaintext: Buffer; ciphertext: Buffer }>;
+}
+
+export interface KmsRequestOptions {
+  signal?: AbortSignal;
 }
 
 export interface SchemaRegistry {
@@ -93,6 +97,7 @@ export interface ProcessorContext {
   readonly requestId: string;
   readonly timestamp: number;
   readonly signal?: AbortSignal;
+  readonly limits?: Readonly<EngineLimits>;
   metadata: Record<string, unknown>;
   logger?:  Logger;
   span?:    Span;
@@ -102,6 +107,7 @@ export interface ProcessorPlugin {
   readonly name:    string;
   readonly version: string;
   readonly reversible?: boolean;
+  readonly streaming?: boolean;
   process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> | Buffer;
   reverse?(data: Buffer, ctx: ProcessorContext): Promise<Buffer> | Buffer;
   createStream?(mode: 'compress' | 'decompress', context?: StreamPluginContext): Duplex;

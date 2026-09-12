@@ -95,7 +95,7 @@ export class BinaryController {
         pSpan?.setAttribute('mode', 'process');
         
         try {
-          const ctx = makeContext(requestId, { originalType }, this.#engine.logger, pSpan, signal);
+          const ctx = makeContext(requestId, { originalType }, this.#engine.logger, pSpan, signal, this.#engine.limits);
           data = await withRetry(() => plugin.process(data, ctx), plugin.retryOptions, this.#engine.logger, { signal, limits: this.#engine.limits });
           if (data.length > this.#engine.limits.maxOutputBytes) throw new Error(`[PipeX] Plugin output exceeds configured limit`);
         } catch (e) {
@@ -208,7 +208,7 @@ export class BinaryController {
         pSpan?.setAttribute('mode', 'reverse');
         
         try {
-          const ctx = makeContext(requestId, { originalType: origType }, this.#engine.logger, pSpan, signal);
+          const ctx = makeContext(requestId, { originalType: origType }, this.#engine.logger, pSpan, signal, this.#engine.limits);
           data = await withRetry(
             () => plugin.reverse!(data, ctx),
             plugin.retryOptions,
