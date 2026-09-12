@@ -22,6 +22,7 @@ import {
   type StreamPluginContext,
   isManifest 
 } from './types.js';
+import { UnsupportedReverseError } from './errors.js';
 
 export { isManifest };
 
@@ -103,6 +104,15 @@ type PluginWithStream = ProcessorPlugin & {
 
 export function hasStreamSupport(p: ProcessorPlugin): p is PluginWithStream {
   return typeof p['createStream'] === 'function';
+}
+
+export function supportsReverse(plugin: ProcessorPlugin): plugin is ProcessorPlugin & Required<Pick<ProcessorPlugin, 'reverse'>> {
+  return plugin.reversible !== false && typeof plugin.reverse === 'function';
+}
+
+export function assertReversiblePipeline(plugins: readonly ProcessorPlugin[]): void {
+  const unsupported = plugins.find(plugin => !supportsReverse(plugin));
+  if (unsupported) throw new UnsupportedReverseError(`${unsupported.name}@${unsupported.version}`);
 }
 
 // ─── Buffer helpers ───────────────────────────────────────────────────────────
@@ -390,6 +400,7 @@ export function buildTransformChain(
   dlq?:    Writable,
   streamContext?: StreamPluginContext,
 ): (Duplex | Transform | PackrStream | GuardedUnpackrStream)[] {
+  if (reverse) assertReversiblePipeline(plugins);
   const ordered = reverse ? [...plugins].reverse() : plugins;
   return ordered.flatMap((plugin, index) => {
     const transform = hasStreamSupport(plugin)

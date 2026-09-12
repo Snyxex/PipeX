@@ -101,6 +101,7 @@ export interface ProcessorContext {
 export interface ProcessorPlugin {
   readonly name:    string;
   readonly version: string;
+  readonly reversible?: boolean;
   process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> | Buffer;
   reverse?(data: Buffer, ctx: ProcessorContext): Promise<Buffer> | Buffer;
   createStream?(mode: 'compress' | 'decompress', context?: StreamPluginContext): Duplex;

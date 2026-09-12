@@ -5,13 +5,37 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { DataEngine, EncryptionPlugin, HashingPlugin, CompressionPlugin, WorkerPoolPlugin } from '../dist/index.mjs';
+import { BasePlugin, DataEngine, EncryptionPlugin, HashingPlugin, CompressionPlugin, UnsupportedReverseError, WorkerPoolPlugin } from '../dist/index.mjs';
 
 const collect = async (stream) => {
   const chunks = [];
   await pipeline(stream, new Writable({ write(chunk, _encoding, callback) { chunks.push(chunk); callback(); } }));
   return Buffer.concat(chunks);
 };
+
+// Forward-only plugins fail closed before any reverse pipeline is executed.
+{
+  class ForwardOnlyPlugin extends BasePlugin {
+    name = 'forward-only';
+    version = '1.0.0';
+    process(data) { return data; }
+  }
+  const engine = new DataEngine().use(new ForwardOnlyPlugin());
+  const result = await engine.binary.run(Buffer.from('not reversible'));
+  await assert.rejects(engine.binary.undo(result), error => {
+    assert.ok(error instanceof UnsupportedReverseError);
+    assert.equal(error.code, 'UNSUPPORTED_REVERSE');
+    return true;
+  });
+  await assert.rejects(
+    engine.stream.pipe(
+      Readable.from([result.data]),
+      new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+      true,
+    ),
+    UnsupportedReverseError,
+  );
+}
 
 // Config-driven setup includes the standard plugin registry and exposes the
 // effective pipeline without requiring consumers to register built-ins.

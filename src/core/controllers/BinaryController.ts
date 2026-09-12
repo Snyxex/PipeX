@@ -18,6 +18,7 @@ import {
   withRetry,
   buildManifest,
   isManifest,
+  assertReversiblePipeline,
 } from '../core.js';
 import type { EngineResult, PipeXManifest, OperationOptions } from '../types.js';
 
@@ -162,6 +163,8 @@ export class BinaryController {
       ? forceTypeOrOptions
       : operationOptions;
     const signal = this.#engine.createOperationSignal(options);
+    const plugins = this.#engine.plugins;
+    assertReversiblePipeline(plugins);
 
     const requestId  = this.#engine.startRequest({ operation: 'undo', originalType: origType });
     const span = this.#engine.tracer?.startSpan('binary:undo', { requestId } as any);
@@ -199,8 +202,7 @@ export class BinaryController {
 
     try {
       signal.throwIfAborted();
-      for (const plugin of [...this.#engine.plugins].reverse()) {
-        if (typeof plugin.reverse !== 'function') continue;
+      for (const plugin of [...plugins].reverse()) {
         
         const pSpan = this.#engine.tracer?.startSpan(`plugin:${plugin.name}`, { requestId } as any);
         pSpan?.setAttribute('mode', 'reverse');
