@@ -35,24 +35,10 @@ export class StreamController {
     return { requestId, signal, limits: this.#engine.limits, logger: this.#engine.logger, tracer: this.#engine.tracer };
   }
 
-  #bridge(input: PassThrough, output: PassThrough, objectMode: boolean): Duplex {
-    const duplex = new Duplex({
-      writableObjectMode: objectMode,
-      readableObjectMode: objectMode,
-      write(chunk, encoding, callback) {
-        input.write(chunk, encoding as BufferEncoding, callback);
-      },
-      final(callback) {
-        output.once('end', callback);
-        input.end();
-      },
-      read() { /* output events push data below */ },
-    });
-    output.on('data', chunk => duplex.push(chunk));
-    output.once('end', () => duplex.push(null));
-    output.once('error', error => duplex.destroy(error));
-    input.once('error', error => duplex.destroy(error));
-    return duplex;
+  #bridge(input: PassThrough, output: PassThrough): Duplex {
+    // Node supports a { writable, readable } pair here since v16.8. The
+    // NodeJS typings do not currently model the Node-stream pair overload.
+    return Duplex.from({ writable: input, readable: output } as unknown as NodeJS.ReadWriteStream);
   }
 
   /**
@@ -153,7 +139,7 @@ export class StreamController {
       buildManifestHeaderTransform(buildManifest([])),
       buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),
     ];
-    const duplex = this.#bridge(input, output, true);
+    const duplex = this.#bridge(input, output);
     runPipeline(input, transforms, output, { signal })
       .then(() => {
         this.#engine.endRequest(requestId);
@@ -203,7 +189,7 @@ export class StreamController {
       extract,
       validate,
     ];
-    const duplex = this.#bridge(input, output, true);
+    const duplex = this.#bridge(input, output);
     runPipeline(input, transforms, output, { signal })
       .then(() => {
         this.#engine.endRequest(requestId);
