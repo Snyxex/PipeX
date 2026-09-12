@@ -132,6 +132,18 @@ const collect = async (stream) => {
   const compressed = await compressedPromise;
   assert.equal(order[0], 'event-loop');
   assert.deepEqual(await plugin.reverse(compressed, {}), source);
+
+  const chunks = [];
+  for (let offset = 0; offset < source.length; offset += 16 * 1024) {
+    chunks.push(source.subarray(offset, offset + 16 * 1024));
+  }
+  const streamed = await collect(Readable.from(chunks).pipe(plugin.createStream('compress')));
+  const restored = await collect(Readable.from([streamed]).pipe(plugin.createStream('decompress')));
+  assert.deepEqual(restored, source);
+  await assert.rejects(
+    pipeline(Readable.from([]), plugin.createStream('decompress'), new Writable({ write(_chunk, _encoding, callback) { callback(); } })),
+    /packet too short/,
+  );
 }
 
 // HMAC stream verification must round-trip fragmented input without quadratic

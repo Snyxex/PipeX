@@ -4,7 +4,7 @@ import {
   constants as zlibConstants
 } from 'node:zlib';
 import { promisify } from 'node:util';
-import { Transform, type TransformCallback } from 'node:stream';
+import { compose, Duplex, PassThrough, Transform, type TransformCallback } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
 import type { ProcessorContext } from '../core/types.js';
 
@@ -96,79 +96,68 @@ export class CompressionPlugin extends BasePlugin {
     return payload;
   }
 
-  public createStream(mode: 'compress' | 'decompress'): Transform {
+  public createStream(mode: 'compress' | 'decompress'): Duplex {
     const { type, level } = this.options;
-    let headerSent = false;
 
     if (mode === 'compress') {
       const compressor = type === 'gzip'
         ? createGzip({ level: level ?? 6 })
         : type === 'brotli'
           ? createBrotliCompress({ params: { [zlibConstants.BROTLI_PARAM_QUALITY]: level ?? 11 } })
-          : new Transform({ transform(c, _e, cb) { cb(null, c); } });
-
-      return new Transform({
+          : new PassThrough();
+      let headerSent = false;
+      const prependHeader = new Transform({
         transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
           if (!headerSent) {
             headerSent = true;
             this.push(Buffer.from([TYPE_BYTE_MAP[type]]));
           }
-          if (!compressor.write(chunk)) {
-            compressor.once('drain', cb);
-          } else {
-            cb();
-          }
+          cb(null, chunk);
         },
         flush(cb: TransformCallback) {
-          compressor.end();
-          compressor.on('data', (c) => this.push(c));
-          compressor.on('end', cb);
-        }
-      });
-    } else {
-      // Decompress mode
-      let decompressor: Transform | null = null;
-
-      return new Transform({
-        transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
-          let payload = chunk;
-          if (!headerSent) {
-            headerSent = true;
-            if (chunk.length < 1) return cb(new Error('[PipeX] Stream decompression: packet too short'));
-            const typeId = chunk.readUInt8(0);
-            const detectedType = ID_TO_TYPE[typeId];
-            if (!detectedType) return cb(new Error('[PipeX] Stream decompression: unknown type'));
-            payload = chunk.subarray(1);
-
-            decompressor = detectedType === 'gzip'
-              ? createGunzip()
-              : detectedType === 'brotli'
-                ? createBrotliDecompress()
-                : new Transform({ transform(c, _e, cb) { cb(null, c); } });
-            
-            decompressor.on('data', (c) => this.push(c));
-            decompressor.on('error', (e) => this.emit('error', e));
-          }
-
-          if (decompressor && payload.length > 0) {
-            if (!decompressor.write(payload)) {
-              decompressor.once('drain', cb);
-            } else {
-              cb();
-            }
-          } else {
-            cb();
-          }
+          if (!headerSent) this.push(Buffer.from([TYPE_BYTE_MAP[type]]));
+          cb();
         },
-        flush(cb: TransformCallback) {
-          if (decompressor) {
-            decompressor.end();
-            decompressor.once('end', cb);
-          } else {
-            cb();
-          }
-        }
       });
+      return compose(compressor, prependHeader);
     }
+
+    let decompressor: Transform | null = null;
+    let headerSeen = false;
+    return new Transform({
+      transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
+        let payload = chunk;
+        if (!headerSeen) {
+          headerSeen = true;
+          if (chunk.length < 1) return cb(new Error('[PipeX] Stream decompression: packet too short'));
+          const detectedType = ID_TO_TYPE[chunk.readUInt8(0)];
+          if (!detectedType) return cb(new Error('[PipeX] Stream decompression: unknown type'));
+          payload = chunk.subarray(1);
+          decompressor = detectedType === 'gzip'
+            ? createGunzip()
+            : detectedType === 'brotli'
+              ? createBrotliDecompress()
+              : new PassThrough();
+          decompressor.on('data', value => this.push(value));
+          decompressor.once('error', error => this.destroy(error));
+        }
+
+        const active = decompressor;
+        if (!active) return cb(new Error('[PipeX] Stream decompression: missing decoder'));
+        if (payload.length === 0 || active.write(payload)) cb();
+        else active.once('drain', cb);
+      },
+      flush(cb: TransformCallback) {
+        if (!decompressor) {
+          return cb(new Error('[PipeX] Stream decompression: packet too short'));
+        }
+        decompressor.once('end', cb);
+        decompressor.end();
+      },
+      destroy(error, cb) {
+        decompressor?.destroy();
+        cb(error);
+      },
+    });
   }
 }
