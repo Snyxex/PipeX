@@ -26,9 +26,9 @@ import type {
   , OperationOptions
 } from './types.js';
 import { DEFAULT_LIMITS }       from './core.js';
-import { FileController }       from './controllers/Filecontroller.js';
-import { BinaryController }     from './controllers/Binarycontroller.js';
-import { StreamController }     from './controllers/Streamcontroller.js';
+import { FileController }       from './controllers/FileController.js';
+import { BinaryController }     from './controllers/BinaryController.js';
+import { StreamController }     from './controllers/StreamController.js';
 
 // ─── Typed EventEmitter ───────────────────────────────────────────────────────
 
@@ -311,7 +311,19 @@ export class DataEngine extends EventEmitter {
     event: K,
     ...args: PipeXEventMap[K]
   ): boolean {
-    return super.emit(event, ...args);
+    // Observability hooks must never take down data processing. A user-supplied
+    // listener is outside the pipeline's trust boundary and may throw.
+    try {
+      return super.emit(event, ...args);
+    } catch (error) {
+      try {
+        this.#logger?.error('[PipeX] Event listener failed', {
+          event: String(event),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } catch { /* logger isolation */ }
+      return false;
+    }
   }
 
   override on<K extends keyof PipeXEventMap>(
