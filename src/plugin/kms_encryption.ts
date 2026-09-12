@@ -83,7 +83,8 @@ function providerControl(context: ProcessorContext): {
   const timer = setTimeout(() => {
     timeoutController.abort(new DOMException('KMS provider operation timed out', 'TimeoutError'));
   }, timeoutMs);
-  timer.unref();
+  // This timer may be the only active handle for a provider promise that never
+  // settles. Keep it referenced so the configured timeout always rejects.
   const signal = context.signal
     ? AbortSignal.any([context.signal, timeoutController.signal])
     : timeoutController.signal;
