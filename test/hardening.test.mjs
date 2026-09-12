@@ -13,6 +13,19 @@ const collect = async (stream) => {
   return Buffer.concat(chunks);
 };
 
+// Config-driven setup includes the standard plugin registry and exposes the
+// effective pipeline without requiring consumers to register built-ins.
+{
+  const engine = await DataEngine.fromConfig({
+    plugins: [{ name: 'compression', options: { type: 'gzip', level: 1 } }],
+  });
+  assert.deepEqual(engine.pipeline, ['compression@3.0.0']);
+  await assert.rejects(
+    DataEngine.fromConfig({ plugins: [{ name: 'compression', options: { type: 'invalid' } }] }),
+    /Failed to initialize plugin "compression"/,
+  );
+}
+
 // Duplex pack/unpack must preserve object frames.
 {
   const engine = new DataEngine();

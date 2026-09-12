@@ -1,104 +1,143 @@
-# PipeX 🚀
+# PipeX
 
-**PipeX** is a high-performance, modular data transformation engine for TypeScript. It allows you to effortlessly chain compression, encryption, hashing, and validation through a unified, stream-aware architecture.
+PipeX is a typed Node.js data-transformation engine for composing compression, authenticated encryption, integrity checks, validation, and custom plugins across buffers, files, and streams.
 
-Unlike simple pipe utilities, PipeX is a **Data Highway** that ensures your data is secure, compact, and self-describing.
+## Requirements
 
----
+- Node.js 20 or newer
+- ESM (`"type": "module"`)
 
-## ✨ Key Features
+## Installation
 
-- **Standard Plugin Library:** Built-in support for Gzip, Brotli, AES-256-GCM, HMAC, and more.
-- **Always-on Validation:** Integrated Zod support for schema-driven data integrity.
-- **Manifest System:** Object-stream packages carry a validated format manifest. `pack()` is serialization-only; use `process()`/`stream.pipe()` for encryption and compression.
-- **Multi-Controller API:** Specialized interfaces for **File**, **Binary** (In-Memory), and **Live Streams**.
-- **High Performance:** Powered by `msgpackr` for binary serialization and Node.js native streams.
-- **Worker Support:** Offload heavy CPU tasks to a persistent worker pool with one line of code.
-
----
-
-## 📦 Installation
+PipeX is not published to npm yet. Install it from the repository or consume a packed release artifact:
 
 ```bash
-In future maybe on npm 
-npm install pipex zod
+npm install github:Snyxex/PipeX
 ```
 
----
+## Quick start
 
-## 🚀 Quick Start
+```ts
+import { randomBytes } from 'node:crypto';
+import { DataEngine, CompressionPlugin, EncryptionPlugin } from 'pipex';
 
-```typescript
-import { DataEngine, Plugins } from 'pipex';
-import { z } from 'zod';
+const engine = new DataEngine({
+  maxInputBytes: 64 * 1024 * 1024,
+  operationTimeoutMs: 30_000,
+})
+  .use(new CompressionPlugin({ type: 'gzip', level: 6 }))
+  .use(new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: randomBytes(32) }));
 
-// 1. Define your data schema
-const UserSchema = z.object({
-  id: z.number(),
-  username: z.string()
+const result = await engine.binary.run({ id: 1, username: 'dev' });
+const restored = await engine.binary.undo(result);
+```
+
+Keep encryption keys outside source control and load them from a secret manager or KMS in production.
+
+## Choosing the right API
+
+| Use case | API | Notes |
+| --- | --- | --- |
+| Transform an object or buffer in memory | `binary.run()` / `binary.undo()` | Applies the configured plugin chain |
+| Encode or decode MessagePack | `binary.pack()` / `binary.unpack()` | Serialization only; no plugins |
+| Transform an existing file | `file.process()` / `file.reverse()` | Atomic output replacement and bounded streaming |
+| Encode object frames to a file | `file.pack()` / `file.unpack()` | Serialization only; includes a manifest |
+| Transform Node.js byte streams | `stream.pipe()` | Applies plugins with backpressure |
+| Encode object streams | `stream.pack()` / `stream.unpack()` | Serialization only; includes a manifest |
+
+`pack()` and `unpack()` never encrypt, compress, or hash. Use `run()`/`undo()`, `process()`/`reverse()`, or `stream.pipe()` for plugin transformations.
+
+## Files
+
+Output paths are constrained to `allowedRoot`. When it is omitted, PipeX uses the current working directory. Parent directories must already exist.
+
+```ts
+await engine.file.process('./data/input.bin', './data/input.pipex', './data', { timeoutMs: 60_000 });
+await engine.file.reverse('./data/input.pipex', './data/restored.bin', './data');
+```
+
+PipeX rejects traversal, symlink escapes, and identical input/output files. Outputs are written to a private temporary file and renamed after successful completion.
+
+## Streams and cancellation
+
+```ts
+import { createReadStream, createWriteStream } from 'node:fs';
+
+const controller = new AbortController();
+await engine.stream.pipe(
+  createReadStream('./input.bin'),
+  createWriteStream('./output.pipex'),
+  false,
+  { signal: controller.signal, timeoutMs: 30_000 },
+);
+```
+
+Authenticated decryption and HMAC verification withhold plaintext until authentication succeeds. These verification paths buffer data up to the configured hard limit; they are not constant-memory streams.
+
+## Configuration
+
+Built-in plugins are registered automatically:
+
+```ts
+const engine = await DataEngine.fromConfig({
+  plugins: [
+    { name: 'compression', options: { type: 'brotli', level: 5 } },
+    { name: 'hashing', options: { algorithm: 'sha256', secret: process.env.PIPEX_HMAC_SECRET } },
+  ],
 });
 
-// 2. Setup the Engine
-const engine = new DataEngine()
-  .setSchema(UserSchema)
-  .use(new Plugins.Compression({ type: 'brotli' }))
-  .use(new Plugins.Encryption({ algorithm: 'aes-256-gcm', key: Buffer.from('...') }));
-
-// 3. Transform Data
-// Binary (In-Memory)
-const result = await engine.binary.run({ id: 1, username: 'dev' });
-
-// File (Zero-RAM streaming)
-await engine.file.process('input.json', 'output.pipex');
-
-// 4. Restore Data
-const original = await engine.binary.undo(result);
+console.log(engine.pipeline);
+// ['compression@3.0.0', 'hashing@3.0.0']
 ```
 
----
+Available names are `compression`, `encryption`, `hashing`, `benchmark`, `worker-pool`, `validation`, and `kms-encryption`. Options containing runtime objects, such as Zod schemas or KMS providers, must be supplied programmatically.
 
-## 🛠️ Controllers
+Register a custom plugin with `DataEngine.registerPlugin('redact', RedactPlugin)`.
 
-PipeX is organized into three specialized controllers:
+## Custom plugins
 
-### 💾 Binary Controller
-Ideal for small-to-medium datasets that fit in memory.
-- `engine.binary.run(data)`: Execute the full pipeline.
-- `engine.binary.undo(result)`: Reverse the pipeline.
-- `engine.binary.pack(data)`: Fast MsgPack serialization.
+```ts
+import { BasePlugin, type ProcessorContext } from 'pipex';
 
-### 📂 File Controller
-Designed for massive files with zero memory overhead.
-- `engine.file.process(src, dst)`: Stream data through the pipeline to a file.
-- `engine.file.pack(src, dst)`: Pack a file with a PipeX Manifest header (serialization-only).
+class PrefixPlugin extends BasePlugin {
+  readonly name = 'prefix';
+  readonly version = '1.0.0';
 
-### 🌊 Stream Controller
-Low-level primitives for live data streams (TCP, WebSockets, etc.).
-- `engine.stream.into(writable)`: Create a writable entry point to your pipeline.
-- `engine.stream.pipe(readable, writable)`: Manually orchestrate a flow.
+  process(data: Buffer, _context: ProcessorContext): Buffer {
+    return Buffer.concat([Buffer.from('PX:'), data]);
+  }
 
----
+  reverse(data: Buffer, _context: ProcessorContext): Buffer {
+    return data.subarray(3);
+  }
+}
+```
 
-## 🔌 Standard Plugins
+Plugins without `createStream()` use a chunk-based fallback. They must be safe to run independently for every stream chunk. Plugins that need whole-message semantics should implement a framed native stream or use the binary API.
 
-| Plugin | Description | Supported Modes |
-| :--- | :--- | :--- |
-| `Compression` | Gzip & Brotli compression | Buffer & Stream |
-| `Encryption` | AES-256-GCM & ChaCha20 | Buffer & Stream |
-| `Hashing` | HMAC-SHA256/512 Integrity | Buffer & Stream |
-| `Validation` | Zod Schema enforcement | Buffer |
-| `WorkerPool` | Multi-threaded XOR/Processing | Buffer & Stream |
-| `Benchmark` | Metrics and byte counting | Buffer |
+## Operational hooks
 
----
+PipeX supports structured logging, audit logging, tracing, progress events, bounded retries, deadlines, concurrency limits, and a writable dead-letter stream. Observer callback failures are isolated from data processing.
 
-## 📖 Deep Dives
+```ts
+engine.setLogger(logger).setAuditLogger(auditLogger).on('error', (error, requestId) => {
+  console.error({ requestId, error: error.message });
+});
+```
 
-- [Architecture Guide](./docs/architecture.md)
-- [Validation System](./docs/validation.md)
+See [Architecture](./docs/architecture.md) and [Production operations](./docs/enterprise.md).
 
----
+## Development
 
-## 📄 License
+```bash
+npm ci
+npm test
+npm run build
+npm pack --dry-run
+```
 
-MIT © [Snyxex](https://github.com/Snyxex)
+`npm test` performs the production TypeScript check and compiled hardening regression suite.
+
+## License
+
+MIT © Snyxex

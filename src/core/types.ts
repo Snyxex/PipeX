@@ -77,7 +77,7 @@ export interface SchemaRegistry {
 }
 
 export interface EngineConfig {
-  plugins?: { name: string; options?: any }[];
+  plugins?: { name: string; options?: unknown }[];
   logging?: { enabled: boolean; level?: string };
   tracing?: { enabled: boolean };
   dlq?:     { path: string };

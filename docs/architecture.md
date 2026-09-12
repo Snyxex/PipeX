@@ -1,72 +1,71 @@
-# PipeX Architecture Guide
+# PipeX architecture
 
-This document describes the internal design and philosophy of the PipeX Data Engine.
+## Components
 
-## 🏗️ The Three-Tier Design
+`DataEngine` owns configuration, plugin order, limits, schema validation, observability hooks, and request lifecycle state. Its `binary`, `file`, and `stream` controllers expose APIs suited to each I/O model.
 
-PipeX is built on three distinct layers to ensure maximum separation of concerns:
+Core helpers in `src/core/core.ts` implement serialization, retry behavior, manifests, byte/frame limits, path containment, and stream composition. Plugins implement transformations and optional reverse operations.
 
-### 1. The Facade (`DataEngine`)
-The `DataEngine` is the single entry point for the user. It manages:
-- **Plugin Registry:** An ordered list of transformations.
-- **Global Schema:** The Zod schema used for core validation.
-- **Event Lifecycle:** Emitting `start`, `progress`, `plugin:after`, `error`, and `end`.
-- **Controller Wiring:** Delegating tasks to specialized controllers.
+## Data paths
 
-### 2. The Controllers (`src/core/controllers/`)
-Controllers handle the orchestration for specific I/O environments:
-- **BinaryController:** Optimized for `Buffer` and `Object` operations.
-- **FileController:** Optimized for `fs.ReadStream` and `fs.WriteStream`.
-- **StreamController:** Optimized for raw Node.js `Transform` and `PassThrough` pipes.
+### Binary transformations
 
-### 3. Core Primitives (`src/core/core.ts`)
-The core contains **stateless pure functions** and stream factories. It has no knowledge of the `DataEngine` or its state. This makes the core logic highly reusable and easy to unit test.
+`binary.run(value)` converts the value to a buffer, applies plugins in registration order, and returns an `EngineResult`. `binary.undo(result)` applies reversible plugins in reverse order and restores the original JavaScript type.
 
----
+The `EngineResult.pipeline` field records the plugin identifiers used by the operation. It is metadata, not a cryptographic signature.
 
-## 📜 The Manifest System
+### File and raw-stream transformations
 
-When you "pack" data using PipeX, the engine prepends a **PipeX Manifest** frame (encoded in MsgPack) to the beginning of the byte stream.
+`file.process()` and `stream.pipe()` apply plugins in registration order. Reverse operations apply them in reverse order. File writes use a private temporary output followed by an atomic rename so a failed operation does not expose a partial destination.
 
-```typescript
-export interface PipeXManifest {
-  readonly __pipex_v: 1;      // Protocol version
-  readonly plugins:   string[]; // name@version in execution order
-  readonly ts:        number;   // Unix timestamp
+Native plugin streams participate in Node.js backpressure. A plugin without `createStream()` is adapted per chunk; this fallback is only correct for transformations whose chunks can be processed independently.
+
+### MessagePack framing
+
+`binary.pack()`, `file.pack()`, and `stream.pack()` are serialization APIs. They do not apply the plugin chain.
+
+File and stream packages begin with a versioned MessagePack manifest:
+
+```ts
+interface PipeXManifest {
+  readonly __pipex_v: 1;
+  readonly plugins: readonly string[];
+  readonly ts: number;
 }
 ```
 
-### Why it matters:
-- **Validation:** Unpack rejects malformed manifests and plugin-chain mismatches before emitting data.
-- **Scope:** `pack()` serializes object frames and does not apply encryption or compression. Apply plugins through `process()` or `stream.pipe()` before using a separate transport format.
+The serialization-only format currently requires an empty `plugins` list. Decoders validate the manifest, byte limits, and frame count before forwarding application values.
 
----
+## Security boundaries
 
-## 🔌 Plugin Contract
+- Input, output, frame, retry, timeout, and concurrency limits are enforced by the engine.
+- File paths are resolved against an allowed root using real filesystem paths.
+- AES-GCM, ChaCha20-Poly1305, and HMAC verification do not release plaintext before authentication succeeds.
+- Authentication verification buffers plaintext up to the configured bound. This prevents unauthenticated data exposure, but it is not constant-memory processing.
+- KMS envelope keys are validated and plaintext data keys are zeroed after use.
+- Event-listener failures are isolated; audit logger failures remain visible to the caller.
 
-Every plugin must implement the `ProcessorPlugin` interface:
+PipeX does not provide HTTP authentication, authorization, tenant isolation, secret storage, or network policy. The embedding application owns those boundaries.
 
-```typescript
-export interface ProcessorPlugin {
-  readonly name:    string;
+## Performance model
+
+- MessagePack serialization uses `msgpackr`.
+- File and raw-stream paths use Node.js pipeline backpressure.
+- Buffer slicing uses `subarray()` where ownership permits it.
+- HMAC verification performs one bounded aggregate allocation instead of repeated growing concatenations.
+- CPU-heavy synchronous binary compression runs on the caller thread. Prefer stream APIs or a worker strategy for large payloads.
+
+## Plugin contract
+
+```ts
+interface ProcessorPlugin {
+  readonly name: string;
   readonly version: string;
-  
-  // For in-memory Buffer processing
-  process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> | Buffer;
-  reverse?(data: Buffer, ctx: ProcessorContext): Promise<Buffer> | Buffer;
-  
-  // For zero-copy Stream processing
-  createStream?(mode: 'compress' | 'decompress'): Transform;
+  retryOptions?: RetryOptions;
+  process(data: Buffer, context: ProcessorContext): Promise<Buffer> | Buffer;
+  reverse?(data: Buffer, context: ProcessorContext): Promise<Buffer> | Buffer;
+  createStream?(mode: 'compress' | 'decompress', context?: StreamPluginContext): Duplex;
 }
 ```
 
-### Stream Fallback
-If a plugin does **not** implement `createStream`, PipeX automatically wraps the `process`/`reverse` methods in a `Transform` stream. This ensures that every plugin works in a streaming context, though implementing a native `createStream` is always more efficient.
-
----
-
-## 🚀 Performance Design
-
-1. **Zero-Copy Subarrays:** PipeX uses `Buffer.subarray()` wherever possible to avoid expensive memory copies.
-2. **MsgPack over JSON:** Internal serialization uses `msgpackr`, which is significantly faster and produces smaller payloads than `JSON.stringify`.
-3. **Sliding Windows:** Complex plugins (like `HashingPlugin` and `EncryptionPlugin`) use sliding buffer windows in stream mode to handle trailing data (like AuthTags and HMACs) without loading the entire stream into RAM.
+A reversible pipeline requires every state-changing plugin to implement `reverse()`. Missing reverse behavior fails closed in stream fallback mode.

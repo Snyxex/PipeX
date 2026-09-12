@@ -41,31 +41,39 @@ interface PipeXEventMap {
   manifest:       [manifest: unknown, requestId?: string];
 }
 
+export type PluginConstructor<TOptions = unknown> = new (options: TOptions) => ProcessorPlugin;
+
 // ─── Engine ───────────────────────────────────────────────────────────────────
 
 export class DataEngine extends EventEmitter {
   /** Built-in plugin registry for config-driven bootstrap. */
-  private static readonly pluginRegistry = new Map<string, any>();
+  private static readonly pluginRegistry = new Map<string, (options: unknown) => ProcessorPlugin>();
 
   /** Register a plugin class for use in fromConfig(). */
-  public static registerPlugin(name: string, pluginClass: any): void {
+  public static registerPlugin<TOptions>(name: string, pluginClass: PluginConstructor<TOptions>): void {
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name) || typeof pluginClass !== 'function') {
       throw new Error('[PipeX] Invalid plugin registration');
     }
-    this.pluginRegistry.set(name, pluginClass);
+    this.pluginRegistry.set(name, options => new pluginClass(options as TOptions));
   }
 
   /**
    * Bootstrap a DataEngine from a configuration object.
    */
   public static async fromConfig(config: EngineConfig): Promise<DataEngine> {
+    if (!config || typeof config !== 'object') throw new Error('[PipeX] Configuration must be an object');
     const engine = new DataEngine();
     
     if (config.plugins) {
       for (const p of config.plugins) {
-        const PluginClass = this.pluginRegistry.get(p.name);
-        if (!PluginClass) throw new Error(`[PipeX] Unknown plugin in config: ${p.name}`);
-        engine.use(new PluginClass(p.options));
+        const createPlugin = this.pluginRegistry.get(p.name);
+        if (!createPlugin) throw new Error(`[PipeX] Unknown plugin in config: ${p.name}`);
+        try {
+          engine.use(createPlugin(p.options));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(`[PipeX] Failed to initialize plugin "${p.name}": ${message}`, { cause: error });
+        }
       }
     }
 
@@ -269,6 +277,11 @@ export class DataEngine extends EventEmitter {
    */
   get plugins(): readonly ProcessorPlugin[] {
     return this.#plugins;
+  }
+
+  /** Human-readable plugin identifiers in execution order. */
+  get pipeline(): readonly string[] {
+    return this.#plugins.map(plugin => `${plugin.name}@${plugin.version}`);
   }
 
   // ── Request lifecycle (called by controllers) ────────────────────────────────

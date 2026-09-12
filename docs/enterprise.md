@@ -1,115 +1,89 @@
-# PipeX Enterprise Guide
+# Production operations
 
-This guide describes how to use the enterprise-grade features of PipeX to build robust, secure, and observable data pipelines.
+## Resource limits
 
-## 📊 Observability
+Every engine has conservative defaults. Tune them for the workload instead of disabling them:
 
-Enterprise applications must be observable. PipeX provides built-in hooks for structured logging and distributed tracing.
-
-### Structured Logging
-PipeX can be integrated with loggers like **Pino** or **Winston**.
-
-```typescript
-import pino from 'pino';
-const logger = pino();
-
-engine.setLogger({
-  info:  (msg, ctx) => logger.info(ctx, msg),
-  warn:  (msg, ctx) => logger.warn(ctx, msg),
-  error: (msg, ctx) => logger.error(ctx, msg),
-  debug: (msg, ctx) => logger.debug(ctx, msg),
+```ts
+const engine = new DataEngine({
+  maxInputBytes: 64 * 1024 * 1024,
+  maxOutputBytes: 128 * 1024 * 1024,
+  maxFrameBytes: 8 * 1024 * 1024,
+  maxFrames: 100_000,
+  maxConcurrentOperations: 32,
+  operationTimeoutMs: 60_000,
+  maxRetryAttempts: 3,
+  maxRetryDelayMs: 5_000,
 });
 ```
 
-### Distributed Tracing
-PipeX is compatible with **OpenTelemetry**. You can inject a tracer to track plugin execution time and pipeline latency.
+Callers can supply `{ signal, timeoutMs }` to binary, file, and stream operations. A timeout of `0` disables only the per-operation deadline; input and output limits remain active.
 
-```typescript
-engine.setTracer(myOtelTracer);
+## Logging and events
+
+```ts
+engine.setLogger({
+  info: (message, context) => logger.info(context, message),
+  warn: (message, context) => logger.warn(context, message),
+  error: (message, context) => logger.error(context, message),
+  debug: (message, context) => logger.debug(context, message),
+});
+
+engine.on('progress', (bytes, requestId) => metrics.bytes.add(bytes, { requestId }));
+engine.on('error', (error, requestId) => logger.error({ requestId, error }, 'PipeX operation failed'));
 ```
 
----
+Logger and event-listener exceptions are isolated from transformation work. Audit logging is awaited and may fail the caller after transformation completion; operate the audit sink accordingly.
 
-## 🛡️ Resilience
+## Retries and dead-letter output
 
-Transient failures are inevitable in distributed systems. PipeX handles them with automatic retries and Dead Letter Queues (DLQ).
+```ts
+class RemotePlugin extends BasePlugin {
+  readonly name = 'remote';
+  readonly version = '1.0.0';
+  retryOptions = { attempts: 3, backoff: 'exponential' as const, delayMs: 100 };
+  // process() implementation
+}
 
-### Automatic Retries
-Plugins can specify retry policies.
-
-```typescript
-const plugin = new MyPlugin();
-plugin.retryOptions = {
-  attempts: 3,
-  backoff: 'exponential',
-  delayMs: 1000
-};
+engine.setDlq(createWriteStream('./var/pipex.dlq', { flags: 'a', mode: 0o600 }));
 ```
 
-### Dead Letter Queue (DLQ)
-When a plugin fails after all retries, the original data chunk can be diverted to a DLQ instead of crashing the pipeline.
+Retries are capped by engine limits and honor cancellation. The dead-letter stream receives failed chunks only after retry exhaustion. Protect and monitor it like any other potentially sensitive data sink.
 
-```typescript
-import { createWriteStream } from 'node:fs';
-engine.setDlq(createWriteStream('errors.log'));
-```
+## Encryption and key management
 
----
+Use a unique 32-byte key for AES-256-GCM or ChaCha20-Poly1305 and obtain it from a secret manager. Never embed production keys in configuration files or source code.
 
-## 🔐 Security & Compliance
+```ts
+import { DataEngine, KmsEncryptionPlugin, type KmsProvider } from 'pipex';
 
-### KMS Encryption
-PipeX supports **Envelope Encryption** via external Key Management Services (KMS).
-
-```typescript
-import { KmsEncryptionPlugin } from 'pipex/plugins/kms';
-
-engine.use(new KmsEncryptionPlugin({
-  kms: new MyKmsProvider(), // Implements KmsProvider
-  keyId: 'arn:aws:kms:us-east-1:123456789012:key/...'
+const kms: KmsProvider = createKmsProvider();
+const engine = new DataEngine().use(new KmsEncryptionPlugin({
+  kms,
+  keyId: 'production/data-pipeline',
 }));
 ```
 
-### Audit Logging
-Every `run`, `undo`, `pack`, and `unpack` operation can be audited.
+The KMS plugin is binary-only. Use `binary.run()` and `binary.undo()` or provide an application-level framed transport for large streams.
 
-```typescript
+## Audit logging
+
+```ts
 engine.setAuditLogger({
-  log: async (record) => {
-    // Save to a secure audit database
-    await db.audit.insert(record);
-  }
+  async log(record) {
+    await auditStore.append(record);
+  },
 });
 ```
 
----
+Audit records include request ID, operation, plugin chain, timestamp, and operation metadata. They do not contain payload bytes.
 
-## 🚀 Performance
+## Deployment checklist
 
-### Warm Worker Pools
-For heavy CPU tasks, use the `WorkerPoolPlugin` which utilizes a persistent pool of warm workers via `piscina`.
-
-```typescript
-import { WorkerPoolPlugin } from 'pipex/plugins/worker';
-engine.use(new WorkerPoolPlugin({ maxThreads: 4 }));
-```
-
----
-
-## ⚙️ DevOps & Configuration
-
-### Environment-Driven Setup
-Bootstrap your engine from a JSON or YAML configuration file.
-
-```typescript
-const config = await readConfig('pipex.prod.json');
-const engine = await DataEngine.fromConfig(config);
-```
-
-### Schema Registry
-Ensure data consistency by fetching Zod schemas from a central registry.
-
-```typescript
-engine.setSchemaRegistry(myRegistry);
-await engine.loadSchema('transactions/v1');
-```
+- Use `npm ci` with the committed lockfile.
+- Run `npm test`, `npm run build`, and `npm pack --dry-run` in CI.
+- Store encryption and HMAC secrets outside the package and application image.
+- Configure explicit resource limits and deadlines for the workload.
+- Keep output roots private and owned by the service account.
+- Monitor error events, dead-letter growth, timeouts, and worker-pool saturation.
+- Exercise round-trip and tamper tests with production-equivalent KMS, storage, and filesystem permissions before rollout.

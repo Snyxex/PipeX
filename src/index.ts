@@ -1,12 +1,26 @@
 // Export the Core
 export * from './core/core.js';
-export { DataEngine }        from './core/dataEngine.js';
+import { DataEngine } from './core/dataEngine.js';
+export { DataEngine };
+export type { PluginConstructor } from './core/dataEngine.js';
 export type {
   ProcessorPlugin,
   ProcessorContext,
   EngineResult,
   PipeXManifest,
   EngineEvents,
+  EngineLimits,
+  OperationOptions,
+  StreamPluginContext,
+  RetryOptions,
+  Logger,
+  Span,
+  Tracer,
+  AuditRecord,
+  AuditLogger,
+  KmsProvider,
+  SchemaRegistry,
+  EngineConfig,
 }                            from './core/types.js';
 export { isManifest }        from './core/types.js';
 
@@ -21,6 +35,13 @@ import { WorkerPoolPlugin } from './plugin/worker.js';
 import { ValidationPlugin } from './core/validation.js';
 import { KmsEncryptionPlugin } from './plugin/kms_encryption.js';
 
+export type { HashingOptions, HashAlgorithm } from './plugin/hashing.js';
+export type { EncryptionOptions, EncryptionAlgorithm } from './plugin/encryption.js';
+export type { CompressionOptions, CompressionType } from './plugin/compression.js';
+export type { WorkerPoolOptions } from './plugin/worker.js';
+export type { ValidationOptions } from './core/validation.js';
+export type { KmsEncryptionOptions } from './plugin/kms_encryption.js';
+
 export const Plugins = {
   Hashing: HashingPlugin,
   Encryption: EncryptionPlugin,
@@ -30,6 +51,16 @@ export const Plugins = {
   Validation: ValidationPlugin,
   KmsEncryption: KmsEncryptionPlugin,
 } as const;
+
+// Make config-driven setup work out of the box while keeping custom plugin
+// registration available through DataEngine.registerPlugin().
+DataEngine.registerPlugin('hashing', HashingPlugin);
+DataEngine.registerPlugin('encryption', EncryptionPlugin);
+DataEngine.registerPlugin('compression', CompressionPlugin);
+DataEngine.registerPlugin('benchmark', BenchmarkPlugin);
+DataEngine.registerPlugin('worker-pool', WorkerPoolPlugin);
+DataEngine.registerPlugin('validation', ValidationPlugin);
+DataEngine.registerPlugin('kms-encryption', KmsEncryptionPlugin);
 
 // Also export individually for those who prefer it
 export { HashingPlugin, EncryptionPlugin, CompressionPlugin, BenchmarkPlugin, WorkerPoolPlugin, ValidationPlugin, KmsEncryptionPlugin };

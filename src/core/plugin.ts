@@ -1,8 +1,9 @@
-import type { ProcessorPlugin, ProcessorContext } from './types.js';
+import type { ProcessorPlugin, ProcessorContext, RetryOptions } from './types.js';
 
 export abstract class BasePlugin implements ProcessorPlugin {
   abstract readonly name: string;
   abstract readonly version: string;
+  public retryOptions?: RetryOptions;
 
   constructor(protected options: any = {}) {}
 
