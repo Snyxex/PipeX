@@ -31,6 +31,8 @@ import { FileController }       from './controllers/FileController.js';
 import { BinaryController }     from './controllers/BinaryController.js';
 import { StreamController }     from './controllers/StreamController.js';
 
+const MAX_TIMER_MS = 0x7fff_ffff;
+
 // ─── Typed EventEmitter ───────────────────────────────────────────────────────
 
 interface PipeXEventMap {
@@ -122,8 +124,12 @@ export class DataEngine extends EventEmitter {
       }
     }
     if (limits.maxInputBytes < 1 || limits.maxOutputBytes < 1 || limits.maxFrameBytes < 1
-      || limits.maxFrames < 1 || limits.maxConcurrentOperations < 1 || limits.maxRetryAttempts < 1) {
+      || limits.maxFrames < 1 || limits.maxConcurrentOperations < 1 || limits.maxRetryAttempts < 1
+      || limits.maxKmsEncryptedKeyBytes < 1 || limits.maxKmsKeyIdBytes < 1) {
       throw new Error('[PipeX] Engine limits must be positive');
+    }
+    if (limits.operationTimeoutMs > MAX_TIMER_MS || limits.maxKmsEncryptedKeyBytes > 0xffff_ffff) {
+      throw new Error('[PipeX] Engine limit exceeds its supported protocol or timer range');
     }
   }
 
@@ -143,7 +149,7 @@ export class DataEngine extends EventEmitter {
 
   createOperationSignal(options: OperationOptions = {}): AbortSignal {
     const timeoutMs = options.timeoutMs ?? this.#limits.operationTimeoutMs;
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_TIMER_MS) {
       throw new Error('[PipeX] Invalid operation timeout');
     }
     const signals = options.signal ? [options.signal] : [];

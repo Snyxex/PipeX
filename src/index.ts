@@ -19,6 +19,8 @@ export type {
   AuditRecord,
   AuditLogger,
   KmsProvider,
+  KmsOperation,
+  KmsProviderCapabilities,
   KmsRequestOptions,
   SchemaRegistry,
   EngineConfig,
@@ -31,16 +33,22 @@ export { isManifest }        from './core/types.js';
 export { BasePlugin } from './core/plugin.js';
 export {
   KmsProviderError,
+  KmsAuthenticationError,
+  KmsProviderAuthenticationError,
+  KmsProviderUnavailableError,
+  InvalidKmsProviderCapabilityError,
   InvalidPluginCapabilityError,
   OperationAbortedError,
   OperationTimeoutError,
   PipeXError,
   UnsupportedReverseError,
   UnsupportedStreamingError,
+  UnsupportedKmsOperationError,
   WorkerPoolClosedError,
   WorkerTaskError,
 } from './core/errors.js';
-export type { InvalidPluginCapabilityIssue, PipeXErrorCode } from './core/errors.js';
+export type { InvalidKmsProviderCapabilityIssue, InvalidPluginCapabilityIssue, PipeXErrorCode } from './core/errors.js';
+export { getKmsProviderCapabilities, supportsKmsOperation } from './core/kmsCapabilities.js';
 
 // --- Standard Plugin Library ---
 import { HashingPlugin } from './plugin/hashing.js';

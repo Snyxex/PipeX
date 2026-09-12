@@ -131,6 +131,8 @@ test('engine limits reject invalid integers and cannot be mutated in place', () 
   for (const maxFrameBytes of [-1, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(() => new DataEngine({ maxFrameBytes }), /Invalid engine limit|must be positive/);
   }
+  assert.throws(() => new DataEngine({ operationTimeoutMs: 0x8000_0000 }), /supported protocol or timer range/);
+  assert.throws(() => new DataEngine({ maxKmsEncryptedKeyBytes: 0x1_0000_0000 }), /supported protocol or timer range/);
 
   const engine = new DataEngine(limits({ maxFrameBytes: 64 }));
   assert.equal(Object.isFrozen(engine.limits), true);
@@ -205,6 +207,37 @@ test('KMS rejects impossible output sizes before contacting the provider', async
       return true;
     },
   );
+  assert.equal(called, false);
+});
+
+test('KMS encrypted-key limits come from immutable engine configuration and clear rejected keys', async () => {
+  let generatedKey;
+  const plugin = new KmsEncryptionPlugin({
+    keyId: 'key',
+    kms: {
+      async generateDataKey() {
+        generatedKey = Buffer.alloc(32, 0x5a);
+        return { plaintext: generatedKey, ciphertext: Buffer.alloc(5) };
+      },
+      async decrypt() { return Buffer.alloc(32); },
+    },
+  });
+  const engine = new DataEngine(limits({ maxKmsEncryptedKeyBytes: 4 })).use(plugin);
+  await assert.rejects(engine.binary.run(Buffer.from('input')), /invalid encrypted key/);
+  assert.ok(generatedKey.every(byte => byte === 0));
+  assert.equal(engine.limits.maxKmsEncryptedKeyBytes, 4);
+});
+
+test('KMS key identifier byte limits are central and enforced before provider calls', async () => {
+  let called = false;
+  const engine = new DataEngine(limits({ maxKmsKeyIdBytes: 4 })).use(new KmsEncryptionPlugin({
+    keyId: 'ééé', // six UTF-8 bytes
+    kms: {
+      async generateDataKey() { called = true; return { plaintext: Buffer.alloc(32), ciphertext: Buffer.alloc(1) }; },
+      async decrypt() { called = true; return Buffer.alloc(32); },
+    },
+  }));
+  await assert.rejects(engine.binary.run(Buffer.from('input')), /key identifier exceeds/);
   assert.equal(called, false);
 });
 

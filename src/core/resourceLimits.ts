@@ -9,6 +9,8 @@ export const DEFAULT_LIMITS: Readonly<EngineLimits> = Object.freeze({
   operationTimeoutMs: 5 * 60_000,
   maxRetryAttempts: 5,
   maxRetryDelayMs: 30_000,
+  maxKmsEncryptedKeyBytes: 64 * 1024,
+  maxKmsKeyIdBytes: 512,
 });
 
 type LimitContext = Pick<ProcessorContext | StreamPluginContext, 'limits'>;

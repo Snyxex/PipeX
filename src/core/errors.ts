@@ -5,6 +5,11 @@ export type PipeXErrorCode =
   | 'OPERATION_ABORTED'
   | 'OPERATION_TIMEOUT'
   | 'KMS_PROVIDER_FAILURE'
+  | 'KMS_AUTHENTICATION_FAILED'
+  | 'KMS_PROVIDER_AUTHENTICATION_FAILED'
+  | 'KMS_PROVIDER_UNAVAILABLE'
+  | 'UNSUPPORTED_KMS_OPERATION'
+  | 'INVALID_KMS_PROVIDER_CAPABILITY'
   | 'WORKER_POOL_CLOSED'
   | 'WORKER_TASK_FAILURE';
 
@@ -76,8 +81,51 @@ export class OperationTimeoutError extends PipeXError {
 
 export class KmsProviderError extends PipeXError {
   public override readonly name: string = 'KmsProviderError';
-  constructor(public readonly operation: 'generateDataKey' | 'decrypt', options?: ErrorOptions) {
+  constructor(public readonly operation: 'generateDataKey' | 'decrypt' | 'encrypt', options?: ErrorOptions) {
     super('KMS_PROVIDER_FAILURE', `[PipeX] KMS ${operation} failed`, options);
+  }
+}
+
+export class KmsAuthenticationError extends PipeXError {
+  public override readonly name: string = 'KmsAuthenticationError';
+  constructor() {
+    super('KMS_AUTHENTICATION_FAILED', '[PipeX] KMS envelope authentication failed');
+  }
+}
+
+export class KmsProviderAuthenticationError extends PipeXError {
+  public override readonly name: string = 'KmsProviderAuthenticationError';
+  constructor(public readonly operation: 'generateDataKey' | 'decrypt' | 'encrypt') {
+    super('KMS_PROVIDER_AUTHENTICATION_FAILED', `[PipeX] KMS ${operation} authentication failed`);
+  }
+}
+
+export class KmsProviderUnavailableError extends PipeXError {
+  public override readonly name: string = 'KmsProviderUnavailableError';
+  constructor(public readonly operation: 'generateDataKey' | 'decrypt' | 'encrypt') {
+    super('KMS_PROVIDER_UNAVAILABLE', `[PipeX] KMS ${operation} provider unavailable`);
+  }
+}
+
+export class UnsupportedKmsOperationError extends PipeXError {
+  public override readonly name: string = 'UnsupportedKmsOperationError';
+  constructor(public readonly operation: 'generateDataKey' | 'decrypt' | 'encrypt') {
+    super('UNSUPPORTED_KMS_OPERATION', `[PipeX] KMS provider does not support ${operation}`);
+  }
+}
+
+export type InvalidKmsProviderCapabilityIssue = 'MUST_BE_BOOLEAN' | 'MISSING_IMPLEMENTATION';
+
+export class InvalidKmsProviderCapabilityError extends PipeXError {
+  public override readonly name: string = 'InvalidKmsProviderCapabilityError';
+  constructor(
+    public readonly operation: 'generateDataKey' | 'decrypt' | 'encrypt',
+    public readonly issue: InvalidKmsProviderCapabilityIssue,
+  ) {
+    const details = issue === 'MUST_BE_BOOLEAN'
+      ? 'must be a boolean when declared'
+      : 'is declared but its implementation is missing';
+    super('INVALID_KMS_PROVIDER_CAPABILITY', `[PipeX] Invalid KMS ${operation} capability: ${details}`);
   }
 }
 

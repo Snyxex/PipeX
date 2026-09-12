@@ -66,6 +66,10 @@ enforced separately.
 - KMS envelopes carry a version, algorithm, explicit lengths, and authenticated
   metadata. Envelope keys are validated and plaintext data keys are zeroed
   after use.
+- Generic KMS operations expose runtime-validated capabilities. Provider calls
+  inherit the central operation deadline and cancellation signal; provider
+  authentication, availability, timeout, cancellation, and unknown failures
+  use distinct sanitized error types.
 - Event-listener failures are isolated; audit logger failures remain visible to the caller.
 
 PipeX does not provide HTTP authentication, authorization, tenant isolation, secret storage, or network policy. The embedding application owns those boundaries.

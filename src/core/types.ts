@@ -37,6 +37,10 @@ export interface EngineLimits {
   operationTimeoutMs: number;
   maxRetryAttempts: number;
   maxRetryDelayMs: number;
+  /** Maximum provider-wrapped data-key bytes accepted in a KMS envelope. */
+  maxKmsEncryptedKeyBytes: number;
+  /** Maximum UTF-8 bytes accepted for a provider key identifier. */
+  maxKmsKeyIdBytes: number;
 }
 
 export interface OperationOptions {
@@ -66,10 +70,20 @@ export interface AuditLogger {
   log(record: AuditRecord): void | Promise<void>;
 }
 
+export type KmsOperation = 'encrypt' | 'decrypt' | 'generateDataKey';
+
+export interface KmsProviderCapabilities {
+  readonly encrypt: boolean;
+  readonly decrypt: boolean;
+  readonly generateDataKey: boolean;
+}
+
 export interface KmsProvider {
-  encrypt(data: Buffer, keyId: string, options?: KmsRequestOptions): Promise<Buffer>;
-  decrypt(data: Buffer, keyId: string, options?: KmsRequestOptions): Promise<Buffer>;
-  generateDataKey(keyId: string, options?: KmsRequestOptions): Promise<{ plaintext: Buffer; ciphertext: Buffer }>;
+  /** Explicit false disables an operation even when a compatibility stub exists. */
+  readonly capabilities?: Partial<KmsProviderCapabilities>;
+  encrypt?(data: Buffer, keyId: string, options?: KmsRequestOptions): Promise<Buffer>;
+  decrypt?(data: Buffer, keyId: string, options?: KmsRequestOptions): Promise<Buffer>;
+  generateDataKey?(keyId: string, options?: KmsRequestOptions): Promise<{ plaintext: Buffer; ciphertext: Buffer }>;
 }
 
 export interface KmsRequestOptions {

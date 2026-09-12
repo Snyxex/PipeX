@@ -1,8 +1,16 @@
 import { randomBytes, createCipheriv, createDecipheriv, type CipherGCM, type DecipherGCM } from 'node:crypto';
 import { BasePlugin } from '../core/plugin.js';
-import { pluginInputLimit, pluginOutputLimit } from '../core/resourceLimits.js';
-import type { ProcessorContext, KmsProvider } from '../core/types.js';
-import { KmsProviderError, OperationAbortedError, OperationTimeoutError } from '../core/errors.js';
+import { DEFAULT_LIMITS, pluginInputLimit, pluginOutputLimit } from '../core/resourceLimits.js';
+import type { KmsOperation, KmsProviderCapabilities, ProcessorContext, KmsProvider } from '../core/types.js';
+import {
+  KmsAuthenticationError,
+  KmsProviderAuthenticationError,
+  KmsProviderError,
+  KmsProviderUnavailableError,
+  OperationAbortedError,
+  OperationTimeoutError,
+} from '../core/errors.js';
+import { assertKmsOperation, getKmsProviderCapabilities } from '../core/kmsCapabilities.js';
 
 export interface KmsEncryptionOptions {
   kms: KmsProvider;
@@ -17,7 +25,7 @@ const MAGIC = Buffer.from('PXKM');
 const FORMAT_VERSION = 1;
 const ALGORITHM_AES_256_GCM = 1;
 const FIXED_HEADER_LENGTH = 4 + 1 + 1 + 2 + 4 + 4 + IV_LENGTH;
-const MAX_ENCRYPTED_KEY_BYTES = 64 * 1024;
+const MAX_TIMER_MS = 0x7fff_ffff;
 
 function abortError(signal: AbortSignal): OperationAbortedError | OperationTimeoutError {
   const options = { cause: signal.reason };
@@ -33,7 +41,9 @@ async function abortable<T>(
 ): Promise<T> {
   if (!signal) return promise;
   if (signal.aborted) {
-    void promise.then(value => disposeLate?.(value), () => undefined);
+    void promise.then(value => {
+      try { disposeLate?.(value); } catch { /* best-effort cleanup must not reject */ }
+    }, () => undefined);
     throw abortError(signal);
   }
   return new Promise<T>((resolve, reject) => {
@@ -46,7 +56,9 @@ async function abortable<T>(
     void promise.then(
       value => {
         signal.removeEventListener('abort', onAbort);
-        if (aborted) disposeLate?.(value);
+        if (aborted) {
+          try { disposeLate?.(value); } catch { /* best-effort cleanup must not reject */ }
+        }
         else resolve(value);
       },
       error => {
@@ -55,6 +67,55 @@ async function abortable<T>(
       },
     );
   });
+}
+
+function providerControl(context: ProcessorContext): {
+  signal: AbortSignal | undefined;
+  cleanup(): void;
+} {
+  const timeoutMs = context.limits?.operationTimeoutMs ?? DEFAULT_LIMITS.operationTimeoutMs;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_TIMER_MS) {
+    throw new Error('[PipeX] Invalid KMS provider timeout');
+  }
+  if (timeoutMs === 0) return { signal: context.signal, cleanup() {} };
+
+  const timeoutController = new AbortController();
+  const timer = setTimeout(() => {
+    timeoutController.abort(new DOMException('KMS provider operation timed out', 'TimeoutError'));
+  }, timeoutMs);
+  timer.unref();
+  const signal = context.signal
+    ? AbortSignal.any([context.signal, timeoutController.signal])
+    : timeoutController.signal;
+  return { signal, cleanup() { clearTimeout(timer); } };
+}
+
+function sanitizeProviderError(operation: KmsOperation, error: unknown): Error {
+  if (error instanceof OperationAbortedError || error instanceof OperationTimeoutError) return error;
+  if (error instanceof KmsProviderAuthenticationError) return new KmsProviderAuthenticationError(operation);
+  if (error instanceof KmsProviderUnavailableError) return new KmsProviderUnavailableError(operation);
+  return new KmsProviderError(operation);
+}
+
+async function callProvider<T>(
+  provider: KmsProvider,
+  operation: KmsOperation,
+  context: ProcessorContext,
+  invoke: (signal: AbortSignal | undefined) => Promise<T>,
+  disposeLate?: (value: T) => void,
+): Promise<T> {
+  assertKmsOperation(provider, operation);
+  const control = providerControl(context);
+  try {
+    if (control.signal?.aborted) throw abortError(control.signal);
+    const promise = invoke(control.signal);
+    return await abortable(promise, control.signal, disposeLate);
+  } catch (error) {
+    if (control.signal?.aborted) throw abortError(control.signal);
+    throw sanitizeProviderError(operation, error);
+  } finally {
+    control.cleanup();
+  }
 }
 
 /**
@@ -69,22 +130,35 @@ async function abortable<T>(
  */
 export class KmsEncryptionPlugin extends BasePlugin {
   public readonly name = 'kms-encryption';
-  public readonly version = '2.0.0';
+  public readonly version = '2.1.0';
   public readonly streaming = false;
+
+  public get providerCapabilities(): Readonly<KmsProviderCapabilities> {
+    return getKmsProviderCapabilities(this.options.kms);
+  }
+
+  public override get reversible(): boolean {
+    return this.providerCapabilities.decrypt;
+  }
 
   constructor(protected override options: KmsEncryptionOptions) {
     super(options);
-    if (!options.kms || typeof options.keyId !== 'string' || options.keyId.length === 0 || options.keyId.length > 512) {
+    if (!options || !options.kms || typeof options.keyId !== 'string' || options.keyId.length === 0) {
       throw new Error('[PipeX] KMS Encryption: invalid provider or keyId');
     }
     if (options.allowLegacyDecrypt !== undefined && typeof options.allowLegacyDecrypt !== 'boolean') {
       throw new Error('[PipeX] KMS Encryption allowLegacyDecrypt must be a boolean');
     }
+    getKmsProviderCapabilities(options.kms);
+    assertKmsOperation(options.kms, 'generateDataKey');
   }
 
   public override async process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
     const maxInputBytes = pluginInputLimit(ctx);
     const maxOutputBytes = pluginOutputLimit(ctx);
+    const maxEncryptedKeyBytes = ctx.limits?.maxKmsEncryptedKeyBytes ?? DEFAULT_LIMITS.maxKmsEncryptedKeyBytes;
+    const maxKeyIdBytes = ctx.limits?.maxKmsKeyIdBytes ?? DEFAULT_LIMITS.maxKmsKeyIdBytes;
+    if (Buffer.byteLength(this.options.keyId) > maxKeyIdBytes) throw new Error('[PipeX] KMS key identifier exceeds the configured limit');
     if (data.length > maxInputBytes) throw new Error(`[PipeX] KMS encryption input exceeds ${maxInputBytes} bytes`);
     if (data.length > 0xffff_ffff) throw new Error('[PipeX] KMS encryption input exceeds the format limit');
     const minimumOverhead = FIXED_HEADER_LENGTH + 1 + TAG_LENGTH;
@@ -93,22 +167,19 @@ export class KmsEncryptionPlugin extends BasePlugin {
     }
     const { kms, keyId } = this.options;
 
-    let keyResult: { plaintext: Buffer; ciphertext: Buffer };
-    try {
-      keyResult = await abortable(
-        kms.generateDataKey(keyId, { signal: ctx.signal }),
-        ctx.signal,
-        value => { if (Buffer.isBuffer(value?.plaintext)) value.plaintext.fill(0); },
-      );
-    } catch (error) {
-      if (error instanceof OperationAbortedError || error instanceof OperationTimeoutError) throw error;
-      throw new KmsProviderError('generateDataKey', { cause: error });
-    }
+    const keyResult = await callProvider(
+      kms,
+      'generateDataKey',
+      ctx,
+      signal => kms.generateDataKey!(keyId, { signal }),
+      value => { if (Buffer.isBuffer(value?.plaintext)) value.plaintext.fill(0); },
+    );
 
-    const { plaintext, ciphertext: encryptedKey } = keyResult;
+    const plaintext = keyResult?.plaintext;
     try {
+      const encryptedKey = keyResult?.ciphertext;
       if (!Buffer.isBuffer(plaintext) || plaintext.length !== 32) throw new Error('[PipeX] KMS generated an invalid data key');
-      if (!Buffer.isBuffer(encryptedKey) || encryptedKey.length < 1 || encryptedKey.length > MAX_ENCRYPTED_KEY_BYTES) {
+      if (!Buffer.isBuffer(encryptedKey) || encryptedKey.length < 1 || encryptedKey.length > maxEncryptedKeyBytes) {
         throw new Error('[PipeX] KMS generated an invalid encrypted key');
       }
       const overhead = FIXED_HEADER_LENGTH + encryptedKey.length + TAG_LENGTH;
@@ -138,8 +209,12 @@ export class KmsEncryptionPlugin extends BasePlugin {
 
   public override async reverse(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
     const { kms, keyId } = this.options;
+    assertKmsOperation(kms, 'decrypt');
     const maxInputBytes = pluginInputLimit(ctx);
     const maxOutputBytes = pluginOutputLimit(ctx);
+    const maxEncryptedKeyBytes = ctx.limits?.maxKmsEncryptedKeyBytes ?? DEFAULT_LIMITS.maxKmsEncryptedKeyBytes;
+    const maxKeyIdBytes = ctx.limits?.maxKmsKeyIdBytes ?? DEFAULT_LIMITS.maxKmsKeyIdBytes;
+    if (Buffer.byteLength(keyId) > maxKeyIdBytes) throw new Error('[PipeX] KMS key identifier exceeds the configured limit');
     if (data.length > maxInputBytes) throw new Error(`[PipeX] KMS decryption input exceeds ${maxInputBytes} bytes`);
     if (data.length === 0) throw new Error('[PipeX] KMS Decryption: Packet too short');
 
@@ -164,7 +239,7 @@ export class KmsEncryptionPlugin extends BasePlugin {
       }
       const keyLen = data.readUInt32BE(8);
       const ciphertextLength = data.readUInt32BE(12);
-      if (keyLen < 1 || keyLen > MAX_ENCRYPTED_KEY_BYTES) throw new Error('[PipeX] KMS Decryption: invalid key envelope');
+      if (keyLen < 1 || keyLen > maxEncryptedKeyBytes) throw new Error('[PipeX] KMS Decryption: invalid key envelope');
       const expectedLength = FIXED_HEADER_LENGTH + keyLen + ciphertextLength + TAG_LENGTH;
       if (expectedLength !== data.length) throw new Error('[PipeX] KMS Decryption: invalid envelope length');
       if (ciphertextLength > maxOutputBytes) throw new Error(`[PipeX] KMS decryption output exceeds ${maxOutputBytes} bytes`);
@@ -176,7 +251,7 @@ export class KmsEncryptionPlugin extends BasePlugin {
     } else {
       if (data.length < 4) throw new Error('[PipeX] KMS Decryption: Packet too short');
       const keyLen = data.readUInt32BE(0);
-      if (keyLen < 1 || keyLen > MAX_ENCRYPTED_KEY_BYTES || data.length < 4 + keyLen + IV_LENGTH + TAG_LENGTH) {
+      if (keyLen < 1 || keyLen > maxEncryptedKeyBytes || data.length < 4 + keyLen + IV_LENGTH + TAG_LENGTH) {
         throw new Error('[PipeX] KMS Decryption: invalid key envelope');
       }
       encryptedKey = data.subarray(4, 4 + keyLen);
@@ -188,17 +263,13 @@ export class KmsEncryptionPlugin extends BasePlugin {
       throw new Error(`[PipeX] KMS decryption output exceeds ${maxOutputBytes} bytes`);
     }
     
-    let plaintext: Buffer;
-    try {
-      plaintext = await abortable(
-        kms.decrypt(encryptedKey, keyId, { signal: ctx.signal }),
-        ctx.signal,
-        value => { if (Buffer.isBuffer(value)) value.fill(0); },
-      );
-    } catch (error) {
-      if (error instanceof OperationAbortedError || error instanceof OperationTimeoutError) throw error;
-      throw new KmsProviderError('decrypt', { cause: error });
-    }
+    const plaintext = await callProvider(
+      kms,
+      'decrypt',
+      ctx,
+      signal => kms.decrypt!(encryptedKey, keyId, { signal }),
+      value => { if (Buffer.isBuffer(value)) value.fill(0); },
+    );
 
     try {
       if (!Buffer.isBuffer(plaintext) || plaintext.length !== 32) throw new Error('[PipeX] KMS Decryption: invalid data key length');
@@ -211,7 +282,7 @@ export class KmsEncryptionPlugin extends BasePlugin {
         return final.length === 0 ? pending : Buffer.concat([pending, final]);
       } catch {
         pending.fill(0);
-        throw new Error('[PipeX] KMS Decryption: authentication failed');
+        throw new KmsAuthenticationError();
       }
     } finally {
       if (Buffer.isBuffer(plaintext)) plaintext.fill(0);

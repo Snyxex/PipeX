@@ -14,6 +14,8 @@ const engine = new DataEngine({
   operationTimeoutMs: 5 * 60_000,
   maxRetryAttempts: 5,
   maxRetryDelayMs: 30_000,
+  maxKmsEncryptedKeyBytes: 64 * 1024,
+  maxKmsKeyIdBytes: 512,
 });
 ```
 
@@ -33,7 +35,9 @@ copying, cryptographic work, validation parsing, or worker transfer;
 decompression uses the configured output bound. KMS encryption rejects outputs
 that cannot fit even the smallest valid envelope before contacting the provider,
 then rechecks the provider-supplied envelope size. The encrypted KMS data-key
-field also has a separate 64-KiB protocol bound.
+field is bounded by the central `maxKmsEncryptedKeyBytes` limit (64 KiB by
+default). Provider key identifiers are independently bounded as UTF-8 by
+`maxKmsKeyIdBytes` (512 bytes by default).
 
 `engine.limits` is frozen. Use `setLimits()` between operations; changing limits
 while a request is active is rejected so a pipeline cannot observe mixed limits.
@@ -73,12 +77,26 @@ Retries are capped by engine limits and honor cancellation. The dead-letter stre
 
 ## Encryption and key management
 
+`KmsEncryptionPlugin` 2.1 adds provider capability discovery, sanitized error
+classification, and provider-call deadlines without changing the `PXKM` v1
+ciphertext format introduced by plugin version 2.0.
+
 Use a unique 32-byte key for AES-256-GCM or ChaCha20-Poly1305 and obtain it from a secret manager. Never embed production keys in configuration files or source code.
 
 ```ts
-import { DataEngine, KmsEncryptionPlugin, type KmsProvider } from 'pipex';
+import {
+  DataEngine,
+  KmsEncryptionPlugin,
+  KmsProviderAuthenticationError,
+  KmsProviderUnavailableError,
+  getKmsProviderCapabilities,
+  type KmsProvider,
+} from 'pipex';
 
 const kms: KmsProvider = createKmsProvider();
+console.log(getKmsProviderCapabilities(kms));
+// { encrypt: false, decrypt: true, generateDataKey: true }
+
 const engine = new DataEngine().use(new KmsEncryptionPlugin({
   kms,
   keyId: 'production/data-pipeline',
@@ -86,6 +104,36 @@ const engine = new DataEngine().use(new KmsEncryptionPlugin({
 ```
 
 The KMS plugin is binary-only. Use `binary.run()` and `binary.undo()` or provide an application-level framed transport for large streams.
+
+Provider methods receive a request-local `AbortSignal`. The engine operation
+deadline applies to every provider call; direct plugin calls use the same
+central `operationTimeoutMs` default. A provider that cannot physically cancel
+an in-flight SDK request may finish in the background, but PipeX stops waiting
+at the deadline and clears any plaintext data key returned later.
+
+Provider methods are optional. Declare a compatibility stub as unsupported so
+PipeX never calls it:
+
+```ts
+const provider: KmsProvider = {
+  capabilities: { encrypt: false, decrypt: true, generateDataKey: true },
+  async encrypt() { throw new Error('legacy stub'); }, // never called by PipeX
+  async decrypt(envelope, keyId, { signal } = {}) { /* adapter */ },
+  async generateDataKey(keyId, { signal } = {}) { /* adapter */ },
+};
+```
+
+Omitted capability flags are derived from method presence. A capability marked
+`true` without an implementation is rejected. `KmsEncryptionPlugin` requires
+`generateDataKey`; a provider without `decrypt` remains usable for forward-only
+encryption and the plugin advertises `reverse: false`.
+
+Provider adapters should translate credential rejection to
+`KmsProviderAuthenticationError` and transient service/network unavailability
+to `KmsProviderUnavailableError`. PipeX preserves those classifications as
+sanitized errors. Unknown provider exceptions become `KmsProviderError`.
+Provider exception messages, key IDs, envelopes, tokens, and payloads are not
+copied into PipeX error messages or log contexts.
 
 ## Audit logging
 

@@ -23,6 +23,10 @@ test('package metadata, lockfile root, and built export targets agree', async ()
   const root = await import('pipex');
   const kms = await import('pipex/plugins/kms');
   assert.equal(typeof root.DataEngine, 'function');
+  assert.equal(typeof root.getKmsProviderCapabilities, 'function');
+  assert.equal(typeof root.KmsProviderAuthenticationError, 'function');
+  assert.equal(typeof root.KmsProviderUnavailableError, 'function');
+  assert.equal(typeof root.UnsupportedKmsOperationError, 'function');
   assert.equal(typeof kms.KmsEncryptionPlugin, 'function');
 });
 

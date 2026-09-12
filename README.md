@@ -33,6 +33,9 @@ const restored = await engine.binary.undo(result, { timeoutMs: 30_000 });
 ```
 
 Keep encryption keys outside source control and load them from a secret manager or KMS in production.
+Generic KMS adapters expose queryable operation capabilities and receive an
+`AbortSignal` governed by the engine deadline. See
+[Production operations](./docs/enterprise.md#encryption-and-key-management).
 
 ## Choosing the right API
 
