@@ -139,11 +139,22 @@ See [Architecture](./docs/architecture.md) and [Production operations](./docs/en
 ```bash
 npm ci
 npm test
+npm run test:unit
+npm run test:integration
+npm run test:security
+npm run test:package
+npm run test:performance
 npm run build
 npm pack --dry-run
 ```
 
-`npm test` performs the production TypeScript check and compiled hardening regression suite.
+`npm test` performs the production TypeScript check, build, test-runner checks,
+unit tests, integration tests, behavioral security regressions, and package
+sanity checks. `test:performance` is a short CI-safe smoke suite.
+
+Large throughput work is intentionally excluded from `npm test` and CI. Run it
+manually with `npm run benchmark:large`; set `PIPEX_BENCHMARK_BYTES` to override
+its 1 GiB default within the guarded 1 MiB to 8 GiB range.
 
 ## License
 

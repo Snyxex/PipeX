@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { BasePlugin, DataEngine, EncryptionPlugin, HashingPlugin, CompressionPlugin, UnsupportedReverseError } from '../dist/index.mjs';
+import { BasePlugin, DataEngine, EncryptionPlugin, HashingPlugin, CompressionPlugin, UnsupportedReverseError } from '../../dist/index.mjs';
 
 const collect = async (stream) => {
   const chunks = [];
