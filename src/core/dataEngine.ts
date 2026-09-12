@@ -82,6 +82,7 @@ export class DataEngine extends EventEmitter {
 
   // Plugins are readonly from outside; controllers access via #plugins
   readonly #plugins: ProcessorPlugin[] = [];
+  #pluginView: readonly ProcessorPlugin[] = Object.freeze([]);
   #schema?: z.ZodType<any>;
   #registry?: SchemaRegistry;
   #logger?: Logger;
@@ -206,7 +207,7 @@ export class DataEngine extends EventEmitter {
     if (this.#auditLogger) {
       await this.#auditLogger.log({
         ...record,
-        pluginChain: this.#plugins.map(p => `${p.name}@${p.version}`),
+        pluginChain: this.#pluginView.map(p => `${p.name}@${p.version}`),
         timestamp: Date.now(),
       });
     }
@@ -266,8 +267,12 @@ export class DataEngine extends EventEmitter {
       || typeof plugin.process !== 'function') {
       throw new Error('[PipeX] Invalid processor plugin');
     }
+    if (this.#activeRequests.size > 0) {
+      throw new Error('[PipeX] Cannot modify the plugin pipeline while operations are active');
+    }
     if (this.#plugins.length >= 256) throw new Error('[PipeX] Maximum plugin count exceeded');
     this.#plugins.push(plugin);
+    this.#pluginView = Object.freeze([...this.#plugins]);
     return this;
   }
 
@@ -276,12 +281,12 @@ export class DataEngine extends EventEmitter {
    * Exposed so controllers can iterate without mutating the list.
    */
   get plugins(): readonly ProcessorPlugin[] {
-    return this.#plugins;
+    return this.#pluginView;
   }
 
   /** Human-readable plugin identifiers in execution order. */
   get pipeline(): readonly string[] {
-    return this.#plugins.map(plugin => `${plugin.name}@${plugin.version}`);
+    return Object.freeze(this.#pluginView.map(plugin => `${plugin.name}@${plugin.version}`));
   }
 
   // ── Request lifecycle (called by controllers) ────────────────────────────────

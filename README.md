@@ -94,6 +94,8 @@ Available names are `compression`, `encryption`, `hashing`, `benchmark`, `worker
 
 Register a custom plugin with `DataEngine.registerPlugin('redact', RedactPlugin)`.
 
+`engine.plugins` and `engine.pipeline` return immutable snapshots. Configure the pipeline before starting work; `use()` rejects changes while any operation is active.
+
 ## Custom plugins
 
 ```ts

@@ -54,6 +54,26 @@ const collect = async (stream) => {
   assert.equal((await engine.binary.run(Buffer.from('slot released'))).data.toString(), 'slot released');
 }
 
+// Public plugin state is immutable and cannot change during an operation.
+{
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const engine = new DataEngine().use({
+    name: 'gated',
+    version: '1.0.0',
+    async process(data) { await gate; return data; },
+  });
+  assert.throws(() => engine.plugins.push({}), TypeError);
+  const operation = engine.binary.run(Buffer.from('stable pipeline'));
+  assert.throws(
+    () => engine.use({ name: 'late', version: '1.0.0', process: data => data }),
+    /while operations are active/,
+  );
+  release();
+  await operation;
+  assert.deepEqual(engine.pipeline, ['gated@1.0.0']);
+}
+
 // Duplex pack/unpack must preserve object frames.
 {
   const engine = new DataEngine();

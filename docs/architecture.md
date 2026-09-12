@@ -4,6 +4,8 @@
 
 `DataEngine` owns configuration, plugin order, limits, schema validation, observability hooks, and request lifecycle state. Its `binary`, `file`, and `stream` controllers expose APIs suited to each I/O model.
 
+The configured plugin list is exposed only as an immutable snapshot. Pipeline mutation is rejected while operations are active, so execution and audit metadata cannot diverge during concurrent work.
+
 Core helpers in `src/core/core.ts` implement serialization, retry behavior, manifests, byte/frame limits, path containment, and stream composition. Plugins implement transformations and optional reverse operations.
 
 ## Data paths
