@@ -7,8 +7,11 @@
   "type": "module",
   "sideEffects": false,
   "scripts": {
-    "test": "npm run typecheck:prod && npm run test:hardening",
-    "test:hardening": "npm run build && node test/hardening.test.mjs",
+    "test": "npm run typecheck && npm run build && npm run test:unit && npm run test:security",
+    "test:unit": "node --test --test-concurrency=1 test/unit/*.test.mjs",
+    "test:security": "node test/hardening.test.mjs",
+    "test:hardening": "npm run test:security",
+    "test:performance": "npm run build && node --test test/performance/*.test.mjs",
     "typecheck": "npm run typecheck:prod",
     "typecheck:prod": "tsc -p tsconfig.prod.json --noEmit",
     "build": "tsdown --minify",
@@ -32,7 +35,6 @@
   "devDependencies": {
     "@types/node": "^25.6.0",
     "tsdown": "^0.21.10",
-    "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   },
   "dependencies": {
