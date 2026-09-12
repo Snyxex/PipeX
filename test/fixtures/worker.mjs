@@ -5,9 +5,7 @@ export default function identity(input) {
 }
 
 export function encode(input) {
-  const value = new Uint8Array(input);
-  for (let index = 0; index < value.length; index++) value[index] ^= 0x42;
-  return value;
+  return Uint8Array.from(new Uint8Array(input)).reverse();
 }
 
 export function decode(input) {
@@ -21,4 +19,12 @@ export async function slow(input) {
 
 export function fail() {
   throw new Error('fixture worker failure');
+}
+
+export function hang() {
+  return new Promise(() => {});
+}
+
+export function crash() {
+  process.exit(17);
 }

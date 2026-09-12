@@ -75,6 +75,46 @@ engine.setDlq(createWriteStream('./var/pipex.dlq', { flags: 'a', mode: 0o600 }))
 
 Retries are capped by engine limits and honor cancellation. The dead-letter stream receives failed chunks only after retry exhaustion. Protect and monitor it like any other potentially sensitive data sink.
 
+## Local worker pools
+
+`WorkerPoolPlugin` runs only caller-owned module exports in local Piscina worker
+threads. It is not a scheduler or durable job system. No demo encryption or
+built-in XOR transform is exported by the package.
+
+```ts
+const workers = new WorkerPoolPlugin({
+  filename: new URL('./worker.mjs', import.meta.url),
+  processName: 'transform',
+  reverseName: 'restore',
+  maxThreads: 4,
+  maxQueue: 64,
+  taskTimeoutMs: 30_000,
+  closeTimeoutMs: 10_000,
+});
+```
+
+The default worker count is the smaller of four and the host's available CPU
+parallelism; workers are created lazily. The default queue holds 64 waiting
+tasks. The implementation caps configuration at 128 workers and 100,000 queued
+tasks. Admission is rejected before copying or transferring input once all
+worker and queue slots are occupied. The rejection is a typed
+`WorkerQueueFullError` with code `WORKER_QUEUE_FULL`; callers should apply
+upstream backpressure or retry outside the pool.
+
+Each task combines its caller `AbortSignal` with `taskTimeoutMs`. When
+`taskTimeoutMs` is omitted, the central `operationTimeoutMs` applies; an
+explicit zero disables only the plugin-level timer. Cancellation and timeout
+reject as `OperationAbortedError` and `OperationTimeoutError`. Worker handler
+errors and unexpected worker exits reject as `WorkerTaskError`, so submitted
+promises do not remain pending.
+
+`close()` atomically stops admission, drains every accepted running or queued
+task, and is bounded by `closeTimeoutMs`. Concurrent calls await the same
+shutdown. `close({ force: true })` terminates running and queued work immediately;
+those task promises reject as `WorkerTaskError`. A graceful-close timeout rejects
+as `WorkerPoolCloseError` after terminating the pool. New work rejects as
+`WorkerPoolClosedError` as soon as shutdown begins.
+
 ## Encryption and key management
 
 `KmsEncryptionPlugin` 2.1 adds provider capability discovery, sanitized error

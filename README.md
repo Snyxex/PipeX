@@ -107,6 +107,10 @@ console.log(engine.pipeline);
 
 Available names are `compression`, `encryption`, `hashing`, `benchmark`, `worker-pool`, `validation`, and `kms-encryption`. Options containing runtime objects, such as Zod schemas or KMS providers, must be supplied programmatically.
 
+The local `worker-pool` plugin executes caller-owned worker module exports with
+bounded threads, queue admission, task deadlines, and deterministic shutdown.
+See [Local worker pools](./docs/enterprise.md#local-worker-pools).
+
 `fromConfig()` also accepts `limits`, `logger`, `tracer`, `auditLogger`, `dlq`, `schema`, and `schemaRegistry`. Integration objects are validated immediately so configuration mistakes fail during startup.
 
 Register a custom plugin with `DataEngine.registerPlugin('redact', RedactPlugin)`.

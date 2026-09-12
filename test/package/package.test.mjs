@@ -27,6 +27,8 @@ test('package metadata, lockfile root, and built export targets agree', async ()
   assert.equal(typeof root.KmsProviderAuthenticationError, 'function');
   assert.equal(typeof root.KmsProviderUnavailableError, 'function');
   assert.equal(typeof root.UnsupportedKmsOperationError, 'function');
+  assert.equal(typeof root.WorkerQueueFullError, 'function');
+  assert.equal(typeof root.WorkerPoolCloseError, 'function');
   assert.equal(typeof kms.KmsEncryptionPlugin, 'function');
 });
 

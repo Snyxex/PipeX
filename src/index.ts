@@ -45,6 +45,8 @@ export {
   UnsupportedStreamingError,
   UnsupportedKmsOperationError,
   WorkerPoolClosedError,
+  WorkerPoolCloseError,
+  WorkerQueueFullError,
   WorkerTaskError,
 } from './core/errors.js';
 export type { InvalidKmsProviderCapabilityIssue, InvalidPluginCapabilityIssue, PipeXErrorCode } from './core/errors.js';

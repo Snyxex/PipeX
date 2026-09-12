@@ -11,6 +11,8 @@ export type PipeXErrorCode =
   | 'UNSUPPORTED_KMS_OPERATION'
   | 'INVALID_KMS_PROVIDER_CAPABILITY'
   | 'WORKER_POOL_CLOSED'
+  | 'WORKER_QUEUE_FULL'
+  | 'WORKER_POOL_CLOSE_FAILURE'
   | 'WORKER_TASK_FAILURE';
 
 export class PipeXError extends Error {
@@ -133,6 +135,20 @@ export class WorkerPoolClosedError extends PipeXError {
   public override readonly name: string = 'WorkerPoolClosedError';
   constructor() {
     super('WORKER_POOL_CLOSED', '[PipeX] Worker pool is closed');
+  }
+}
+
+export class WorkerQueueFullError extends PipeXError {
+  public override readonly name: string = 'WorkerQueueFullError';
+  constructor(public readonly maxQueue: number) {
+    super('WORKER_QUEUE_FULL', `[PipeX] Worker queue is full (maximum ${maxQueue} waiting tasks)`);
+  }
+}
+
+export class WorkerPoolCloseError extends PipeXError {
+  public override readonly name: string = 'WorkerPoolCloseError';
+  constructor(options?: ErrorOptions) {
+    super('WORKER_POOL_CLOSE_FAILURE', '[PipeX] Worker pool failed to close cleanly', options);
   }
 }
 

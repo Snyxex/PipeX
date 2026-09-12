@@ -8,6 +8,10 @@ The configured plugin list is exposed only as an immutable snapshot. Pipeline mu
 
 Core helpers in `src/core/core.ts` implement serialization, retry behavior, manifests, byte/frame limits, path containment, and stream composition. Plugins implement transformations and optional reverse operations.
 
+The local worker plugin owns one bounded, lazily created Piscina pool. It
+performs admission control across running and queued tasks, combines task and
+request cancellation, and has explicit draining and forced shutdown states.
+
 ## Data paths
 
 ### Binary transformations
