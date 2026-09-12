@@ -25,7 +25,9 @@ import {
   runPipeline,
   DEFAULT_HIGH_WATER,
   buildByteLimitTransform,
+  buildFrameLimitTransform,
   buildObjectLimitTransform,
+  buildKnownValueByteLimitTransform,
 } from '../core.js';
 import type { OperationOptions, PipeXManifest, StreamPluginContext } from '../types.js';
 
@@ -130,8 +132,14 @@ export class FileController {
         const dst = createWriteStream(temporary, { flags: 'wx', mode: 0o600 });
         const transforms = [
           buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'),
+          buildObjectLimitTransform(this.#engine.limits.maxFrames),
+          buildKnownValueByteLimitTransform(this.#engine.limits.maxFrameBytes, 'MessagePack frame'),
           createPackrStream(),
           buildManifestHeaderTransform(buildManifest([])),
+          buildFrameLimitTransform(
+            this.#engine.limits.maxFrameBytes,
+            Math.min(Number.MAX_SAFE_INTEGER, this.#engine.limits.maxFrames + 1),
+          ),
           buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),
         ];
         await runPipeline(src, transforms, dst, { signal });
@@ -175,9 +183,13 @@ export class FileController {
         });
         await runPipeline(src, [
           buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'),
+          buildFrameLimitTransform(
+            this.#engine.limits.maxFrameBytes,
+            Math.min(Number.MAX_SAFE_INTEGER, this.#engine.limits.maxFrames + 1),
+          ),
           unpacker,
-          buildObjectLimitTransform(this.#engine.limits.maxFrames),
           extract,
+          buildObjectLimitTransform(this.#engine.limits.maxFrames),
           validate,
           ndjson,
           buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),

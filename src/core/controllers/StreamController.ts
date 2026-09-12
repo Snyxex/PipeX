@@ -19,7 +19,9 @@ import {
   createUnpackrStream,
   runPipeline,
   buildByteLimitTransform,
+  buildFrameLimitTransform,
   buildObjectLimitTransform,
+  buildKnownValueByteLimitTransform,
 } from '../core.js';
 import type { OperationOptions, PipeXManifest, StreamPluginContext }  from '../types.js';
 
@@ -142,8 +144,13 @@ export class StreamController {
     const output = new PassThrough();
     const transforms = [
       buildObjectLimitTransform(this.#engine.limits.maxFrames),
+      buildKnownValueByteLimitTransform(this.#engine.limits.maxFrameBytes, 'MessagePack frame'),
       createPackrStream(),
       buildManifestHeaderTransform(buildManifest([])),
+      buildFrameLimitTransform(
+        this.#engine.limits.maxFrameBytes,
+        Math.min(Number.MAX_SAFE_INTEGER, this.#engine.limits.maxFrames + 1),
+      ),
       buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),
     ];
     const duplex = this.#bridge(input, output);
@@ -191,9 +198,13 @@ export class StreamController {
     });
     const transforms = [
       buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'),
+      buildFrameLimitTransform(
+        this.#engine.limits.maxFrameBytes,
+        Math.min(Number.MAX_SAFE_INTEGER, this.#engine.limits.maxFrames + 1),
+      ),
       unpacker,
-      buildObjectLimitTransform(this.#engine.limits.maxFrames),
       extract,
+      buildObjectLimitTransform(this.#engine.limits.maxFrames),
       validate,
     ];
     const duplex = this.#bridge(input, output);

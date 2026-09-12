@@ -7,17 +7,36 @@ Every engine has conservative defaults. Tune them for the workload instead of di
 ```ts
 const engine = new DataEngine({
   maxInputBytes: 64 * 1024 * 1024,
-  maxOutputBytes: 128 * 1024 * 1024,
+  maxOutputBytes: 256 * 1024 * 1024,
   maxFrameBytes: 8 * 1024 * 1024,
   maxFrames: 100_000,
   maxConcurrentOperations: 32,
-  operationTimeoutMs: 60_000,
-  maxRetryAttempts: 3,
-  maxRetryDelayMs: 5_000,
+  operationTimeoutMs: 5 * 60_000,
+  maxRetryAttempts: 5,
+  maxRetryDelayMs: 30_000,
 });
 ```
 
 The same values can be passed as `limits` to `DataEngine.fromConfig()`. That factory also wires supplied `logger`, `tracer`, `auditLogger`, `dlq`, `schema`, and `schemaRegistry` instances; it does not construct integrations from names or file paths.
+
+All defaults are finite. `maxFrameBytes` applies to each top-level MessagePack
+value, while `maxFrames` counts application values (the PipeX manifest is not an
+application value). Incoming frame structure and declared string, binary, array,
+map, and extension lengths are checked before decoding. PipeX's bounded wire
+format rejects the context-dependent C1 token plus msgpackr record-definition
+and bundled-string extensions because they can change how bytes following an
+extension are interpreted; PipeX's own encoders disable those formats.
+
+Native and buffer-based standard plugins receive the same immutable request
+limits. Their temporary buffers and predictable output sizes are checked before
+copying, cryptographic work, validation parsing, or worker transfer;
+decompression uses the configured output bound. KMS encryption rejects outputs
+that cannot fit even the smallest valid envelope before contacting the provider,
+then rechecks the provider-supplied envelope size. The encrypted KMS data-key
+field also has a separate 64-KiB protocol bound.
+
+`engine.limits` is frozen. Use `setLimits()` between operations; changing limits
+while a request is active is rejected so a pipeline cannot observe mixed limits.
 
 Callers can supply `{ signal, timeoutMs }` to binary, file, and stream operations. A timeout of `0` disables only the per-operation deadline; input and output limits remain active.
 

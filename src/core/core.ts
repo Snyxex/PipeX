@@ -30,6 +30,10 @@ import {
   UnsupportedStreamingError,
 } from './errors.js';
 import { BasePlugin } from './plugin.js';
+import { DEFAULT_LIMITS } from './resourceLimits.js';
+
+export { assertMessagePackFrameLimits, buildFrameLimitTransform } from './frameLimits.js';
+export { DEFAULT_LIMITS } from './resourceLimits.js';
 
 export { isManifest };
 
@@ -90,19 +94,9 @@ export const PIPEX_MANIFEST_KEY = '__pipex_v' as const;
 export const PACKR   = new Packr({ useRecords: false });
 export const UNPACKR = new Unpackr({ useRecords: false });
 
+/** @deprecated Use `DEFAULT_LIMITS.maxFrameBytes` or an engine-specific limit. */
 export const MAX_FRAME_BYTES    = 256 * 1024 * 1024;
 export const DEFAULT_HIGH_WATER = 64  * 1024;
-export const DEFAULT_LIMITS: Readonly<EngineLimits> = Object.freeze({
-  maxInputBytes: 64 * 1024 * 1024,
-  maxOutputBytes: 256 * 1024 * 1024,
-  maxFrameBytes: 8 * 1024 * 1024,
-  maxFrames: 100_000,
-  maxConcurrentOperations: 32,
-  operationTimeoutMs: 5 * 60_000,
-  maxRetryAttempts: 5,
-  maxRetryDelayMs: 30_000,
-});
-
 // ─── Type helpers ─────────────────────────────────────────────────────────────
 
 type PluginWithStream = ProcessorPlugin & {
@@ -314,12 +308,14 @@ export class GuardedUnpackrStream extends UnpackrStream {
   }
 
   override _transform(chunk: Buffer, enc: BufferEncoding, cb: TransformCallback): void {
-    this.#receivedBytes += chunk.length;
-    if (this.#receivedBytes > this.#maxInputBytes) {
+    if (chunk.length > this.#maxInputBytes - this.#receivedBytes) {
       cb(new Error(`[PipeX] Serialized input exceeds ${this.#maxInputBytes} bytes`));
       return;
     }
-    super._transform(chunk, enc, cb);
+    this.#receivedBytes += chunk.length;
+    super._transform(chunk, enc, error => {
+      cb(error ? new Error('[PipeX] Invalid MessagePack input') : undefined);
+    });
   }
 }
 
@@ -337,11 +333,11 @@ export function buildByteLimitTransform(maxBytes: number, label: string): Transf
   let total = 0;
   return new Transform({
     transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
-      total += chunk.length;
-      if (total > maxBytes) {
+      if (chunk.length > maxBytes - total) {
         cb(new Error(`[PipeX] ${label} exceeds ${maxBytes} bytes`));
         return;
       }
+      total += chunk.length;
       cb(null, chunk);
     },
   });
@@ -353,12 +349,41 @@ export function buildObjectLimitTransform(maxFrames: number): Transform {
     writableObjectMode: true,
     readableObjectMode: true,
     transform(value: unknown, _enc: BufferEncoding, cb: TransformCallback) {
-      count++;
-      if (count > maxFrames) {
-        cb(new Error(`[PipeX] Decoded frame count exceeds ${maxFrames}`));
+      if (count >= maxFrames) {
+        cb(new Error(`[PipeX] Application frame count exceeds ${maxFrames}`));
         return;
       }
+      count++;
       cb(null, value);
+    },
+  });
+}
+
+/** Rejects known byte-backed values before MessagePack copies their payload. */
+export function assertKnownValueByteLimit(value: unknown, maxBytes: number, label: string): void {
+  const byteLength = typeof value === 'string'
+    ? Buffer.byteLength(value)
+    : Buffer.isBuffer(value) || ArrayBuffer.isView(value)
+      ? value.byteLength
+      : value instanceof ArrayBuffer
+        ? value.byteLength
+        : undefined;
+  if (byteLength !== undefined && byteLength > maxBytes) {
+    throw new Error(`[PipeX] ${label} exceeds ${maxBytes} bytes`);
+  }
+}
+
+export function buildKnownValueByteLimitTransform(maxBytes: number, label: string): Transform {
+  return new Transform({
+    writableObjectMode: true,
+    readableObjectMode: true,
+    transform(value: unknown, _encoding: BufferEncoding, callback: TransformCallback) {
+      try {
+        assertKnownValueByteLimit(value, maxBytes, label);
+        callback(null, value);
+      } catch (error) {
+        callback(error as Error);
+      }
     },
   });
 }
@@ -398,6 +423,10 @@ export function buildFallbackTransform(
           logger,
           { signal: streamContext?.signal, limits: streamContext?.limits },
         );
+        const maxOutputBytes = streamContext?.limits.maxOutputBytes ?? DEFAULT_LIMITS.maxOutputBytes;
+        if (!Buffer.isBuffer(out) || out.length > maxOutputBytes) {
+          throw new Error(`[PipeX] Plugin output exceeds ${maxOutputBytes} bytes`);
+        }
         emitProgress?.(out.length);
         span?.addEvent('processed', { bytes: out.length });
         cb(null, out);

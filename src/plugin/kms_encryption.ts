@@ -1,5 +1,6 @@
 import { randomBytes, createCipheriv, createDecipheriv, type CipherGCM, type DecipherGCM } from 'node:crypto';
 import { BasePlugin } from '../core/plugin.js';
+import { pluginInputLimit, pluginOutputLimit } from '../core/resourceLimits.js';
 import type { ProcessorContext, KmsProvider } from '../core/types.js';
 import { KmsProviderError, OperationAbortedError, OperationTimeoutError } from '../core/errors.js';
 
@@ -10,7 +11,6 @@ export interface KmsEncryptionOptions {
 
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
-const MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 
 function abortError(signal: AbortSignal): OperationAbortedError | OperationTimeoutError {
   const options = { cause: signal.reason };
@@ -72,9 +72,13 @@ export class KmsEncryptionPlugin extends BasePlugin {
   }
 
   public override async process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
-    const maxInputBytes = ctx.limits?.maxInputBytes ?? MAX_BUFFER_BYTES;
-    const maxOutputBytes = ctx.limits?.maxOutputBytes ?? MAX_BUFFER_BYTES;
+    const maxInputBytes = pluginInputLimit(ctx);
+    const maxOutputBytes = pluginOutputLimit(ctx);
     if (data.length > maxInputBytes) throw new Error(`[PipeX] KMS encryption input exceeds ${maxInputBytes} bytes`);
+    const minimumOverhead = 4 + 1 + IV_LENGTH + TAG_LENGTH;
+    if (data.length > maxOutputBytes - minimumOverhead) {
+      throw new Error(`[PipeX] KMS encryption output exceeds ${maxOutputBytes} bytes`);
+    }
     const { kms, keyId } = this.options;
 
     let keyResult: { plaintext: Buffer; ciphertext: Buffer };
@@ -95,8 +99,11 @@ export class KmsEncryptionPlugin extends BasePlugin {
       if (!Buffer.isBuffer(encryptedKey) || encryptedKey.length < 1 || encryptedKey.length > 64 * 1024) {
         throw new Error('[PipeX] KMS generated an invalid encrypted key');
       }
-      const outputLength = 4 + encryptedKey.length + IV_LENGTH + TAG_LENGTH + data.length;
-      if (outputLength > maxOutputBytes) throw new Error(`[PipeX] KMS encryption output exceeds ${maxOutputBytes} bytes`);
+      const overhead = 4 + encryptedKey.length + IV_LENGTH + TAG_LENGTH;
+      if (data.length > maxOutputBytes - overhead) {
+        throw new Error(`[PipeX] KMS encryption output exceeds ${maxOutputBytes} bytes`);
+      }
+      const outputLength = overhead + data.length;
 
       const iv = randomBytes(IV_LENGTH);
       const cipher = createCipheriv('aes-256-gcm', plaintext, iv, { authTagLength: TAG_LENGTH } as any) as CipherGCM;
@@ -112,8 +119,8 @@ export class KmsEncryptionPlugin extends BasePlugin {
 
   public override async reverse(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
     const { kms, keyId } = this.options;
-    const maxInputBytes = ctx.limits?.maxInputBytes ?? MAX_BUFFER_BYTES;
-    const maxOutputBytes = ctx.limits?.maxOutputBytes ?? MAX_BUFFER_BYTES;
+    const maxInputBytes = pluginInputLimit(ctx);
+    const maxOutputBytes = pluginOutputLimit(ctx);
     if (data.length > maxInputBytes) throw new Error(`[PipeX] KMS decryption input exceeds ${maxInputBytes} bytes`);
     if (data.length < 4) throw new Error('[PipeX] KMS Decryption: Packet too short');
     
@@ -125,6 +132,9 @@ export class KmsEncryptionPlugin extends BasePlugin {
     const iv = data.subarray(4 + keyLen, 4 + keyLen + IV_LENGTH);
     const tag = data.subarray(4 + keyLen + IV_LENGTH, 4 + keyLen + IV_LENGTH + TAG_LENGTH);
     const ciphertext = data.subarray(4 + keyLen + IV_LENGTH + TAG_LENGTH);
+    if (ciphertext.length > maxOutputBytes) {
+      throw new Error(`[PipeX] KMS decryption output exceeds ${maxOutputBytes} bytes`);
+    }
     
     let plaintext: Buffer;
     try {
@@ -143,7 +153,6 @@ export class KmsEncryptionPlugin extends BasePlugin {
       const decipher = createDecipheriv('aes-256-gcm', plaintext, iv, { authTagLength: TAG_LENGTH } as any) as DecipherGCM;
       decipher.setAuthTag(tag);
       const restored = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      if (restored.length > maxOutputBytes) throw new Error(`[PipeX] KMS decryption output exceeds ${maxOutputBytes} bytes`);
       return restored;
     } finally {
       if (Buffer.isBuffer(plaintext)) plaintext.fill(0);

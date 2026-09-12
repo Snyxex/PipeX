@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { BasePlugin } from './plugin.js';
 import { UNPACKR } from './core.js';
-import type { ProcessorContext } from './types.js';
+import { pluginInputLimit, pluginOutputLimit } from './resourceLimits.js';
+import type { ProcessorContext, StreamPluginContext } from './types.js';
 import { Transform } from 'node:stream';
 
 export interface ValidationOptions {
@@ -27,46 +28,52 @@ export class ValidationPlugin extends BasePlugin {
     super(options);
   }
 
-  public override async process(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
-    this.validate(data);
+  public override async process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
+    this.validate(data, Math.min(pluginInputLimit(ctx), pluginOutputLimit(ctx)));
     return data;
   }
 
-  public override async reverse(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
+  public override async reverse(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
+    const maxBytes = Math.min(pluginInputLimit(ctx), pluginOutputLimit(ctx));
+    if (data.length > maxBytes) throw new Error(`[PipeX] Validation input exceeds ${maxBytes} bytes`);
     if (this.options.validateOnReverse) {
-      this.validate(data);
+      this.validate(data, maxBytes);
     }
     return data;
   }
 
-  private validate(data: Buffer): void {
+  private validate(data: Buffer, maxBytes: number): void {
+    if (data.length > maxBytes) throw new Error(`[PipeX] Validation input exceeds ${maxBytes} bytes`);
     let decoded: unknown;
     try {
       decoded = UNPACKR.unpack(data);
-    } catch (e) {
-      throw new Error(`[PipeX] Validation: Failed to decode data for validation — ${(e as Error).message}`);
+    } catch {
+      throw new Error('[PipeX] Validation: invalid MessagePack input');
     }
 
     const result = this.options.schema.safeParse(decoded);
     if (!result.success) {
-      throw new Error(`[PipeX] Validation failed: ${result.error.message}`);
+      throw new Error('[PipeX] Validation failed');
     }
   }
 
-  public createStream(): Transform {
+  public createStream(_mode?: 'compress' | 'decompress', context?: StreamPluginContext): Transform {
     const chunks: Buffer[] = [];
     let total = 0;
+    const maxBytes = Math.min(pluginInputLimit(context), pluginOutputLimit(context));
     return new Transform({
       transform(chunk, _enc, cb) {
+        if (chunk.length > maxBytes - total) {
+          return cb(new Error(`[PipeX] Validation input exceeds ${maxBytes} bytes`));
+        }
         total += chunk.length;
-        if (total > 64 * 1024 * 1024) return cb(new Error('[PipeX] Validation input exceeds 64 MiB'));
         chunks.push(chunk);
         cb();
       },
       flush: (cb) => {
         try {
           const data = Buffer.concat(chunks, total);
-          this.validate(data);
+          this.validate(data, maxBytes);
           cb(null, data);
         } catch (error) { cb(error as Error); }
       },

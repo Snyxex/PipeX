@@ -19,6 +19,8 @@ import {
   buildManifest,
   isManifest,
   assertReversiblePipeline,
+  assertMessagePackFrameLimits,
+  assertKnownValueByteLimit,
 } from '../core.js';
 import type { EngineResult, PipeXManifest, OperationOptions } from '../types.js';
 
@@ -35,11 +37,18 @@ export class BinaryController {
    */
   pack(data: unknown): Buffer {
     try {
+      assertKnownValueByteLimit(
+        data,
+        Math.min(this.#engine.limits.maxInputBytes, this.#engine.limits.maxFrameBytes),
+        'Serialization input',
+      );
       const packed = PACKR.pack(data) as Buffer;
       if (packed.length > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Packed input exceeds configured limit');
+      assertMessagePackFrameLimits(packed, this.#engine.limits.maxFrameBytes, 1);
       return packed;
     } catch (err: unknown) {
-      throw new Error(`[PipeX] binary.pack failed: ${(err as Error).message}`);
+      if (err instanceof Error && err.message.startsWith('[PipeX]')) throw err;
+      throw new Error('[PipeX] binary.pack failed');
     }
   }
 
@@ -49,9 +58,11 @@ export class BinaryController {
   unpack<T = unknown>(input: Buffer | Uint8Array): T {
     try {
       if (input.byteLength > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Serialized input exceeds configured limit');
+      assertMessagePackFrameLimits(input, this.#engine.limits.maxFrameBytes, 1);
       return UNPACKR.unpack(input as Buffer) as T;
     } catch (err: unknown) {
-      throw new Error(`[PipeX] binary.unpack failed: ${(err as Error).message}`);
+      if (err instanceof Error && err.message.startsWith('[PipeX]')) throw err;
+      throw new Error('[PipeX] binary.unpack failed: invalid MessagePack input');
     }
   }
 
@@ -80,6 +91,7 @@ export class BinaryController {
 
     let data: Buffer;
     try {
+      assertKnownValueByteLimit(input, this.#engine.limits.maxInputBytes, 'Input');
       data = toBuffer(input);
       if (data.length > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Input exceeds configured limit');
     } catch (error) {
@@ -273,8 +285,15 @@ export class BinaryController {
       throw new Error('[PipeX] packWithManifest is serialization-only; use binary.run for plugin transforms');
     }
     const manifest = buildManifest([]);
+    assertKnownValueByteLimit(
+      data,
+      Math.min(this.#engine.limits.maxInputBytes, this.#engine.limits.maxFrameBytes),
+      'Serialization input',
+    );
     const mFrame   = PACKR.pack(manifest);
     const dFrame   = PACKR.pack(data);
+    assertMessagePackFrameLimits(mFrame, this.#engine.limits.maxFrameBytes, 1);
+    assertMessagePackFrameLimits(dFrame, this.#engine.limits.maxFrameBytes, 1);
     if (mFrame.length + dFrame.length > this.#engine.limits.maxInputBytes) {
       throw new Error('[PipeX] Serialized input exceeds configured limit');
     }
@@ -288,6 +307,11 @@ export class BinaryController {
    */
   unpackWithManifest<T = unknown>(input: Buffer): { manifest: PipeXManifest; data: T } {
     if (input.length > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Serialized input exceeds configured limit');
+    assertMessagePackFrameLimits(
+      input,
+      this.#engine.limits.maxFrameBytes,
+      2,
+    );
     const frames: unknown[] = [];
     try {
       UNPACKR.unpackMultiple(input, (value) => {
@@ -295,7 +319,8 @@ export class BinaryController {
         frames.push(value);
       });
     } catch (err: unknown) {
-      throw new Error(`[PipeX] binary.unpackWithManifest: failed to decode frames — ${(err as Error).message}`);
+      if (err instanceof Error && err.message.startsWith('[PipeX]')) throw err;
+      throw new Error('[PipeX] binary.unpackWithManifest: invalid MessagePack input');
     }
 
     if (frames.length < 2) {

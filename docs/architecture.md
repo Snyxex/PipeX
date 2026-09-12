@@ -42,7 +42,12 @@ interface PipeXManifest {
 }
 ```
 
-The serialization-only format currently requires an empty `plugins` list. Decoders validate the manifest, byte limits, and frame count before forwarding application values.
+The serialization-only format currently requires an empty `plugins` list.
+Before decoding, a structural scanner enforces the configured byte limit at each
+top-level MessagePack frame, including across fragmented length headers. It also
+rejects declared lengths and container counts that cannot fit in the remaining
+frame budget. Aggregate input/output limits and application-frame counts are
+enforced separately.
 
 ## Security boundaries
 

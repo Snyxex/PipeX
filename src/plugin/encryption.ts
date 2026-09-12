@@ -6,7 +6,8 @@ import {
 import type { CipherGCM, DecipherGCM } from 'node:crypto';
 import { Transform, type TransformCallback } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
-import type { ProcessorContext } from '../core/types.js';
+import { pluginInputLimit, pluginOutputLimit } from '../core/resourceLimits.js';
+import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
 
 export type EncryptionAlgorithm = 'aes-256-gcm' | 'chacha20-poly1305';
 
@@ -28,7 +29,6 @@ const ID_TO_ALGO: Record<number, EncryptionAlgorithm> = {
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 const HEADER_LENGTH = 1 + IV_LENGTH + TAG_LENGTH; // [algo][iv][tag]
-const MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 
 /**
  * EncryptionPlugin — Standard library plugin for AES-GCM and ChaCha20-Poly1305.
@@ -48,8 +48,13 @@ export class EncryptionPlugin extends BasePlugin {
     }
   }
 
-  public override async process(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
-    if (data.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] Encryption input exceeds 256 MiB');
+  public override async process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
+    const maxInputBytes = pluginInputLimit(ctx);
+    const maxOutputBytes = pluginOutputLimit(ctx);
+    if (data.length > maxInputBytes) throw new Error(`[PipeX] Encryption input exceeds ${maxInputBytes} bytes`);
+    if (data.length > maxOutputBytes - HEADER_LENGTH) {
+      throw new Error(`[PipeX] Encryption output exceeds ${maxOutputBytes} bytes`);
+    }
     const { algorithm, key } = this.options;
     const iv = randomBytes(IV_LENGTH);
     const cipher = createCipheriv(algorithm, key, iv, { authTagLength: TAG_LENGTH } as any) as CipherGCM;
@@ -62,8 +67,14 @@ export class EncryptionPlugin extends BasePlugin {
     return Buffer.concat([header, iv, tag, encrypted]);
   }
 
-  public override async reverse(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
+  public override async reverse(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
+    const maxInputBytes = pluginInputLimit(ctx);
+    const maxOutputBytes = pluginOutputLimit(ctx);
+    if (data.length > maxInputBytes) throw new Error(`[PipeX] Decryption input exceeds ${maxInputBytes} bytes`);
     if (data.length < HEADER_LENGTH) throw new Error('[PipeX] Decryption failed: packet too short');
+    if (data.length - HEADER_LENGTH > maxOutputBytes) {
+      throw new Error(`[PipeX] Decryption output exceeds ${maxOutputBytes} bytes`);
+    }
 
     const algoId = data.readUInt8(0);
     const algo = ID_TO_ALGO[algoId];
@@ -78,10 +89,15 @@ export class EncryptionPlugin extends BasePlugin {
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   }
 
-  public createStream(mode: 'compress' | 'decompress'): Transform {
+  public createStream(mode: 'compress' | 'decompress', context?: StreamPluginContext): Transform {
     const { algorithm, key } = this.options;
+    const maxInputBytes = pluginInputLimit(context);
+    const maxOutputBytes = pluginOutputLimit(context);
 
     if (mode === 'compress') {
+      if (maxOutputBytes < HEADER_LENGTH) {
+        throw new Error(`[PipeX] Encryption output exceeds ${maxOutputBytes} bytes`);
+      }
       const iv = randomBytes(IV_LENGTH);
       const cipher = createCipheriv(algorithm, key, iv, { authTagLength: TAG_LENGTH } as any) as CipherGCM;
       const dataChunks: Buffer[] = [];
@@ -89,8 +105,13 @@ export class EncryptionPlugin extends BasePlugin {
 
       return new Transform({
         transform(chunk: Buffer, _enc, cb) {
+          if (chunk.length > maxInputBytes - total) {
+            return cb(new Error(`[PipeX] Encryption input exceeds ${maxInputBytes} bytes`));
+          }
+          if (chunk.length > maxOutputBytes - HEADER_LENGTH - total) {
+            return cb(new Error(`[PipeX] Encryption output exceeds ${maxOutputBytes} bytes`));
+          }
           total += chunk.length;
-          if (total > MAX_BUFFER_BYTES) return cb(new Error('[PipeX] Encryption stream exceeds 256 MiB'));
           dataChunks.push(cipher.update(chunk));
           cb();
         },
@@ -107,13 +128,24 @@ export class EncryptionPlugin extends BasePlugin {
       });
     } else {
       // Decompress (Decrypt)
+      const outputBoundedInput = maxOutputBytes > Number.MAX_SAFE_INTEGER - HEADER_LENGTH
+        ? Number.MAX_SAFE_INTEGER
+        : maxOutputBytes + HEADER_LENGTH;
       let headBuf = Buffer.alloc(0);
       let decipher: DecipherGCM | null = null;
 
       const plaintextChunks: Buffer[] = [];
+      let totalInput = 0;
       let totalPlaintext = 0;
       return new Transform({
         transform(chunk: Buffer, _enc, cb) {
+          if (chunk.length > maxInputBytes - totalInput) {
+            return cb(new Error(`[PipeX] Decryption input exceeds ${maxInputBytes} bytes`));
+          }
+          if (chunk.length > outputBoundedInput - totalInput) {
+            return cb(new Error(`[PipeX] Decryption output exceeds ${maxOutputBytes} bytes`));
+          }
+          totalInput += chunk.length;
           if (!decipher) {
             headBuf = Buffer.concat([headBuf, chunk]);
             if (headBuf.length >= HEADER_LENGTH) {
@@ -128,23 +160,33 @@ export class EncryptionPlugin extends BasePlugin {
               
               const rest = headBuf.subarray(HEADER_LENGTH);
               if (rest.length > 0) {
-                totalPlaintext += rest.length;
-                if (totalPlaintext > MAX_BUFFER_BYTES) return cb(new Error('[PipeX] Decryption stream exceeds 256 MiB'));
-                plaintextChunks.push(decipher.update(rest));
+                const plaintext = decipher.update(rest);
+                if (plaintext.length > maxOutputBytes - totalPlaintext) {
+                  return cb(new Error(`[PipeX] Decryption output exceeds ${maxOutputBytes} bytes`));
+                }
+                totalPlaintext += plaintext.length;
+                plaintextChunks.push(plaintext);
               }
               headBuf = Buffer.alloc(0);
             }
           } else {
-            totalPlaintext += chunk.length;
-            if (totalPlaintext > MAX_BUFFER_BYTES) return cb(new Error('[PipeX] Decryption stream exceeds 256 MiB'));
-            plaintextChunks.push(decipher.update(chunk));
+            const plaintext = decipher.update(chunk);
+            if (plaintext.length > maxOutputBytes - totalPlaintext) {
+              return cb(new Error(`[PipeX] Decryption output exceeds ${maxOutputBytes} bytes`));
+            }
+            totalPlaintext += plaintext.length;
+            plaintextChunks.push(plaintext);
           }
           cb();
         },
         flush(cb: TransformCallback) {
           if (!decipher) return cb(new Error('[PipeX] Stream decryption failed: No header'));
           try {
-            plaintextChunks.push(decipher.final());
+            const final = decipher.final();
+            if (final.length > maxOutputBytes - totalPlaintext) {
+              return cb(new Error(`[PipeX] Decryption output exceeds ${maxOutputBytes} bytes`));
+            }
+            plaintextChunks.push(final);
             this.push(Buffer.concat(plaintextChunks));
             cb();
           } catch (e) {

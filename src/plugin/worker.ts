@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { Transform, type TransformCallback } from 'node:stream';
 import { Piscina } from 'piscina';
 import { BasePlugin } from '../core/plugin.js';
+import { pluginInputLimit, pluginOutputLimit } from '../core/resourceLimits.js';
 import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
 import {
   OperationAbortedError,
@@ -85,8 +86,8 @@ export class WorkerPoolPlugin extends BasePlugin {
 
   async #run(data: Buffer, ctx: ProcessorContext, exportName?: string): Promise<Buffer> {
     if (this.#closed) throw new WorkerPoolClosedError();
-    const maxInputBytes = ctx.limits?.maxInputBytes;
-    if (maxInputBytes !== undefined && data.length > maxInputBytes) {
+    const maxInputBytes = pluginInputLimit(ctx);
+    if (data.length > maxInputBytes) {
       throw new Error(`[PipeX] Worker input exceeds ${maxInputBytes} bytes`);
     }
 
@@ -108,9 +109,9 @@ export class WorkerPoolPlugin extends BasePlugin {
       const output = result instanceof ArrayBuffer
         ? Buffer.from(result)
         : Buffer.from(result.buffer, result.byteOffset, result.byteLength);
-      const maxOutputBytes = ctx.limits?.maxOutputBytes;
-      if (maxOutputBytes !== undefined && output.length > maxOutputBytes) {
-        throw new Error(`worker output exceeds ${maxOutputBytes} bytes`);
+      const maxOutputBytes = pluginOutputLimit(ctx);
+      if (output.length > maxOutputBytes) {
+        throw new Error(`[PipeX] Worker output exceeds ${maxOutputBytes} bytes`);
       }
       return output;
     } catch (error) {

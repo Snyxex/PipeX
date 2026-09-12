@@ -98,7 +98,7 @@ export class DataEngine extends EventEmitter {
   #tracer?: Tracer;
   #dlq?:    Writable;
   #auditLogger?: AuditLogger;
-  #limits: EngineLimits;
+  #limits: Readonly<EngineLimits>;
   readonly #activeRequests = new Set<string>();
 
   // ── Controllers ─────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export class DataEngine extends EventEmitter {
 
   constructor(limits: Partial<EngineLimits> = {}) {
     super();
-    this.#limits = { ...DEFAULT_LIMITS, ...limits };
+    this.#limits = Object.freeze({ ...DEFAULT_LIMITS, ...limits });
     this.#validateLimits(this.#limits);
     this.file   = new FileController(this);
     this.binary = new BinaryController(this);
@@ -132,9 +132,12 @@ export class DataEngine extends EventEmitter {
   }
 
   setLimits(limits: Partial<EngineLimits>): this {
+    if (this.#activeRequests.size > 0) {
+      throw new Error('[PipeX] Cannot modify engine limits while operations are active');
+    }
     const next = { ...this.#limits, ...limits };
     this.#validateLimits(next);
-    this.#limits = next;
+    this.#limits = Object.freeze(next);
     return this;
   }
 

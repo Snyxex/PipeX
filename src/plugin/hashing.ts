@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
-import type { ProcessorContext } from '../core/types.js';
+import { pluginInputLimit, pluginOutputLimit } from '../core/resourceLimits.js';
+import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
 
 export type HashAlgorithm = 'sha256' | 'sha512';
 
@@ -14,7 +15,6 @@ const HASH_LENGTHS: Record<HashAlgorithm, number> = {
   'sha256': 32,
   'sha512': 64,
 };
-const MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 
 /**
  * HashingPlugin — Standard library plugin for HMAC integrity checks.
@@ -33,19 +33,28 @@ export class HashingPlugin extends BasePlugin {
   }
 
   public override async process(data: Buffer, context: ProcessorContext): Promise<Buffer> {
-    if (data.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] Hashing input exceeds 256 MiB');
+    const maxInputBytes = pluginInputLimit(context);
+    const maxOutputBytes = pluginOutputLimit(context);
+    const digestLength = HASH_LENGTHS[this.options.algorithm];
+    if (data.length > maxInputBytes) throw new Error(`[PipeX] Hashing input exceeds ${maxInputBytes} bytes`);
+    if (data.length > maxOutputBytes - digestLength) {
+      throw new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`);
+    }
     context.metadata ??= {};
     const hmac = createHmac(this.options.algorithm, this.options.secret);
     const digest = hmac.update(data).digest();
     context.metadata['hmac'] = digest.toString('hex');
     const result = Buffer.concat([data, digest]);
-    if (result.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] Hashing output exceeds 256 MiB');
     return result;
   }
 
   public override async reverse(data: Buffer, context: ProcessorContext): Promise<Buffer> {
     const len = HASH_LENGTHS[this.options.algorithm];
+    const maxInputBytes = pluginInputLimit(context);
+    const maxOutputBytes = pluginOutputLimit(context);
+    if (data.length > maxInputBytes) throw new Error(`[PipeX] Hashing input exceeds ${maxInputBytes} bytes`);
     if (data.length < len) throw new Error('[PipeX] Hashing reverse: data too short');
+    if (data.length - len > maxOutputBytes) throw new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`);
 
     const originalData = data.subarray(0, data.length - len);
     const attachedHash = data.subarray(data.length - len);
@@ -62,14 +71,29 @@ export class HashingPlugin extends BasePlugin {
     return originalData;
   }
 
-  public createStream(mode: 'compress' | 'decompress'): Transform {
+  public createStream(mode: 'compress' | 'decompress', context?: StreamPluginContext): Transform {
     const { algorithm, secret } = this.options;
     const hmac = createHmac(algorithm, secret);
     const len = HASH_LENGTHS[algorithm];
+    const maxInputBytes = pluginInputLimit(context);
+    const maxOutputBytes = pluginOutputLimit(context);
 
     if (mode === 'compress') {
+      let total = 0;
       return new Transform({
+        construct(callback) {
+          callback(maxOutputBytes < len
+            ? new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`)
+            : undefined);
+        },
         transform(chunk: Buffer, _enc, cb) {
+          if (chunk.length > maxInputBytes - total) {
+            return cb(new Error(`[PipeX] Hashing input exceeds ${maxInputBytes} bytes`));
+          }
+          if (chunk.length > maxOutputBytes - len - total) {
+            return cb(new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`));
+          }
+          total += chunk.length;
           hmac.update(chunk);
           this.push(chunk);
           cb();
@@ -86,8 +110,10 @@ export class HashingPlugin extends BasePlugin {
 
       return new Transform({
         transform(chunk: Buffer, _enc, cb) {
+          if (chunk.length > maxInputBytes - total) {
+            return cb(new Error(`[PipeX] Hashing input exceeds ${maxInputBytes} bytes`));
+          }
           total += chunk.length;
-          if (total > MAX_BUFFER_BYTES) return cb(new Error('[PipeX] HMAC stream exceeds 256 MiB'));
           chunks.push(chunk);
           cb();
         },
@@ -97,6 +123,9 @@ export class HashingPlugin extends BasePlugin {
             return cb(new Error('[PipeX] Hashing stream: No HMAC found'));
           }
           const originalData = buffer.subarray(0, buffer.length - len);
+          if (originalData.length > maxOutputBytes) {
+            return cb(new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`));
+          }
           const attachedHash = buffer.subarray(buffer.length - len);
           hmac.update(originalData);
           const expected = hmac.digest();
