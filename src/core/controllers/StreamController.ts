@@ -41,22 +41,16 @@ export class StreamController {
     return Duplex.from({ writable: input, readable: output } as unknown as NodeJS.ReadWriteStream);
   }
 
-  /**
-   * Returns a Writable that pumps incoming bytes through the plugin pipeline
-   * (compress direction) and forwards them to `destination`.
-   *
-   * @example
-   * readableSource.pipe(engine.stream.into(createWriteStream('out')));
-   */
-  into(destination: Writable, options: OperationOptions = {}): Writable {
+  #into(destination: Writable, reverse: boolean, options: OperationOptions): Writable {
     const signal = this.#engine.createOperationSignal(options);
     if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw byte streams');
-    const requestId  = this.#engine.startRequest();
+    const requestId = this.#engine.startRequest();
     const context = this.#streamContext(requestId, signal);
+    const mode = reverse ? 'decompress' : 'compress';
     let transforms: ReturnType<typeof buildTransformChain>;
     try {
       transforms = buildTransformChain(
-        this.#engine.plugins, 'compress', false,
+        this.#engine.plugins, mode, reverse,
         bytes => this.#engine.emitProgress(bytes, requestId),
         this.#engine.logger,
         this.#engine.tracer,
@@ -67,18 +61,60 @@ export class StreamController {
       this.#engine.emitError(error, requestId);
       throw error;
     }
-    const entry = new PassThrough();
-    runPipeline(entry, [buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'), ...transforms, buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output')], destination, { signal })
-      .then(() => {
-        this.#engine.endRequest(requestId);
-        void this.#engine.emitAudit({ requestId, operation: 'process', metadata: { controller: 'stream' } })
-          .catch(error => this.#engine.emitError(error, requestId));
-      })
-      .catch(err => {
-        this.#engine.emitError(err, requestId);
-        entry.destroy(err instanceof Error ? err : new Error(String(err)));
+
+    const source = new PassThrough();
+    let finalCallback: ((error?: Error | null) => void) | undefined;
+    const endpoint = new Writable({
+      write(chunk, encoding, callback) {
+        source.write(chunk, encoding, callback);
+      },
+      final(callback) {
+        finalCallback = callback;
+        source.end();
+      },
+      destroy(error, callback) {
+        finalCallback = undefined;
+        if (!source.destroyed) source.destroy(error ?? undefined);
+        callback(error);
+      },
+    });
+    const settleEndpoint = (error?: Error) => {
+      const callback = finalCallback;
+      finalCallback = undefined;
+      if (callback) callback(error);
+      else if (error && !endpoint.destroyed) endpoint.destroy(error);
+    };
+
+    void runPipeline(source, [
+      buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'),
+      ...transforms,
+      buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),
+    ], destination, { signal }).then(async () => {
+      this.#engine.endRequest(requestId);
+      await this.#engine.emitAudit({
+        requestId,
+        operation: reverse ? 'reverse' : 'process',
+        metadata: { controller: 'stream' },
       });
-    return entry;
+      settleEndpoint();
+    }).catch(error => {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      this.#engine.emitError(failure, requestId);
+      settleEndpoint(failure);
+    });
+
+    return endpoint;
+  }
+
+  /**
+   * Returns a Writable that pumps incoming bytes through the plugin pipeline
+   * (compress direction) and forwards them to `destination`.
+   *
+   * @example
+   * readableSource.pipe(engine.stream.into(createWriteStream('out')));
+   */
+  into(destination: Writable, options: OperationOptions = {}): Writable {
+    return this.#into(destination, false, options);
   }
 
   /**
@@ -89,36 +125,7 @@ export class StreamController {
    * readableSource.pipe(engine.stream.reverseInto(createWriteStream('restored')));
    */
   reverseInto(destination: Writable, options: OperationOptions = {}): Writable {
-    const signal = this.#engine.createOperationSignal(options);
-    if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw byte streams');
-    const requestId  = this.#engine.startRequest();
-    const context = this.#streamContext(requestId, signal);
-    let transforms: ReturnType<typeof buildTransformChain>;
-    try {
-      transforms = buildTransformChain(
-        this.#engine.plugins, 'decompress', true,
-        bytes => this.#engine.emitProgress(bytes, requestId),
-        this.#engine.logger,
-        this.#engine.tracer,
-        this.#engine.dlq,
-        context,
-      );
-    } catch (error) {
-      this.#engine.emitError(error, requestId);
-      throw error;
-    }
-    const entry = new PassThrough();
-    runPipeline(entry, [buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'), ...transforms, buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output')], destination, { signal })
-      .then(() => {
-        this.#engine.endRequest(requestId);
-        void this.#engine.emitAudit({ requestId, operation: 'reverse', metadata: { controller: 'stream' } })
-          .catch(error => this.#engine.emitError(error, requestId));
-      })
-      .catch(err => {
-        this.#engine.emitError(err, requestId);
-        entry.destroy(err instanceof Error ? err : new Error(String(err)));
-      });
-    return entry;
+    return this.#into(destination, true, options);
   }
 
   /**

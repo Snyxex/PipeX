@@ -4,7 +4,7 @@ import {
   constants as zlibConstants
 } from 'node:zlib';
 import { promisify } from 'node:util';
-import { compose, Duplex, PassThrough, Transform, type TransformCallback } from 'node:stream';
+import { compose, Duplex, PassThrough, Readable, Transform, type TransformCallback } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
 import type { ProcessorContext } from '../core/types.js';
 
@@ -122,42 +122,41 @@ export class CompressionPlugin extends BasePlugin {
       return compose(compressor, prependHeader);
     }
 
-    let decompressor: Transform | null = null;
-    let headerSeen = false;
-    return new Transform({
-      transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
-        let payload = chunk;
-        if (!headerSeen) {
-          headerSeen = true;
-          if (chunk.length < 1) return cb(new Error('[PipeX] Stream decompression: packet too short'));
-          const detectedType = ID_TO_TYPE[chunk.readUInt8(0)];
-          if (!detectedType) return cb(new Error('[PipeX] Stream decompression: unknown type'));
-          payload = chunk.subarray(1);
-          decompressor = detectedType === 'gzip'
-            ? createGunzip()
-            : detectedType === 'brotli'
-              ? createBrotliDecompress()
-              : new PassThrough();
-          decompressor.on('data', value => this.push(value));
-          decompressor.once('error', error => this.destroy(error));
-        }
+    return Duplex.from(async function* (source: AsyncIterable<Buffer | Uint8Array>) {
+      const iterator = source[Symbol.asyncIterator]();
+      let first: Buffer | undefined;
+      while (!first) {
+        const next = await iterator.next();
+        if (next.done) throw new Error('[PipeX] Stream decompression: packet too short');
+        const chunk = Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value);
+        if (chunk.length > 0) first = chunk;
+      }
 
-        const active = decompressor;
-        if (!active) return cb(new Error('[PipeX] Stream decompression: missing decoder'));
-        if (payload.length === 0 || active.write(payload)) cb();
-        else active.once('drain', cb);
-      },
-      flush(cb: TransformCallback) {
-        if (!decompressor) {
-          return cb(new Error('[PipeX] Stream decompression: packet too short'));
+      const detectedType = ID_TO_TYPE[first.readUInt8(0)];
+      if (!detectedType) throw new Error('[PipeX] Stream decompression: unknown type');
+      const decompressor = detectedType === 'gzip'
+        ? createGunzip()
+        : detectedType === 'brotli'
+          ? createBrotliDecompress()
+          : new PassThrough();
+
+      async function* payload(): AsyncGenerator<Buffer> {
+        const remainder = first!.subarray(1);
+        if (remainder.length > 0) yield remainder;
+        while (true) {
+          const next = await iterator.next();
+          if (next.done) return;
+          const chunk = Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value);
+          if (chunk.length > 0) yield chunk;
         }
-        decompressor.once('end', cb);
-        decompressor.end();
-      },
-      destroy(error, cb) {
-        decompressor?.destroy();
-        cb(error);
-      },
+      }
+
+      try {
+        for await (const chunk of compose(Readable.from(payload()), decompressor)) yield chunk;
+      } finally {
+        decompressor.destroy();
+        try { await iterator.return?.(); } catch { /* preserve the primary stream error */ }
+      }
     });
   }
 }

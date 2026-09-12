@@ -208,10 +208,9 @@ export function buildManifestHeaderTransform(manifest: PipeXManifest): Transform
     transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
       if (!sent) {
         sent = true;
-        cb(null, Buffer.concat([frame, chunk]));
-      } else {
-        cb(null, chunk);
+        this.push(frame);
       }
+      cb(null, chunk);
     },
     flush(cb: TransformCallback) {
       if (!sent) this.push(frame);
@@ -357,12 +356,24 @@ export function buildFallbackTransform(
             if (!dlq.write(chunk)) await new Promise<void>((resolve, reject) => {
               const onDrain = () => { cleanup(); resolve(); };
               const onError = (writeError: Error) => { cleanup(); reject(writeError); };
+              const onAbort = () => {
+                cleanup();
+                reject(streamContext?.signal.reason instanceof Error
+                  ? streamContext.signal.reason
+                  : new Error('[PipeX] Operation aborted'));
+              };
+              const onClose = () => { cleanup(); reject(new Error('[PipeX] Stream closed while writing to DLQ')); };
               const cleanup = () => {
                 dlq.off('drain', onDrain);
                 dlq.off('error', onError);
+                streamContext?.signal.removeEventListener('abort', onAbort);
+                this.off('close', onClose);
               };
               dlq.once('drain', onDrain);
               dlq.once('error', onError);
+              this.once('close', onClose);
+              if (streamContext?.signal.aborted) onAbort();
+              else streamContext?.signal.addEventListener('abort', onAbort, { once: true });
             });
             cb(error);
           } catch (dlqError) {
@@ -420,6 +431,13 @@ export function buildTransformChain(
     if (!hasStreamSupport(plugin)) return [transform, limit];
 
     const span = tracer?.startSpan(`plugin:${plugin.name}`, { requestId: streamContext?.requestId ?? 'stream' } as ProcessorContext);
+    let spanEnded = false;
+    const endSpan = (error?: Error | null) => {
+      if (spanEnded) return;
+      spanEnded = true;
+      if (error) span?.setAttribute('error', true);
+      span?.end();
+    };
     const observe = new Transform({
       transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
         onProgress?.(chunk.length);
@@ -427,12 +445,11 @@ export function buildTransformChain(
         cb(null, chunk);
       },
       final(cb) {
-        span?.end();
+        endSpan();
         cb();
       },
       destroy(error, cb) {
-        if (error) span?.setAttribute('error', true);
-        span?.end();
+        endSpan(error);
         cb(error);
       },
     });

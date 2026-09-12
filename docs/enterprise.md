@@ -80,7 +80,7 @@ engine.setAuditLogger({
 
 Audit records include request ID, operation, plugin chain, timestamp, and operation metadata. They do not contain payload bytes.
 
-Binary, file, and stream controllers emit the same audit record shape. Awaitable APIs propagate audit-sink failures to the caller. Adapter APIs that return a stream (`into`, `reverseInto`, `pack`, and `unpack`) report asynchronous audit failures through the engine's `error` event because their data stream may already be complete.
+Binary, file, and stream controllers emit the same audit record shape. Awaitable APIs propagate audit-sink failures to the caller. The writable adapters `into` and `reverseInto` delay `finish` and propagate audit failures to the calling stream pipeline. The duplex serialization adapters `pack` and `unpack` report late audit failures through the engine's `error` event because their readable side may already be complete.
 
 ## Deployment checklist
 

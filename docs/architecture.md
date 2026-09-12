@@ -22,6 +22,12 @@ The `EngineResult.pipeline` field records the plugin identifiers used by the ope
 
 Native plugin streams participate in Node.js backpressure. A plugin without `createStream()` is adapted per chunk; this fallback is only correct for transformations whose chunks can be processed independently.
 
+`stream.into()` and `stream.reverseInto()` expose writable endpoints whose
+`finish` event is delayed until the destination, internal pipeline, and audit
+hook have completed. Source, transform, destination, and cancellation errors
+therefore reach the calling `pipeline()` instead of becoming late background
+failures.
+
 ### MessagePack framing
 
 `binary.pack()`, `file.pack()`, and `stream.pack()` are serialization APIs. They do not apply the plugin chain.
