@@ -61,14 +61,17 @@ export class HashingPlugin extends BasePlugin {
 
     const hmac = createHmac(this.options.algorithm, this.options.secret);
     const expected = hmac.update(originalData).digest();
+    try {
+      if (!timingSafeEqual(attachedHash, expected)) {
+        throw new Error('[PipeX] Hashing: HMAC verification failed');
+      }
 
-    if (!timingSafeEqual(attachedHash, expected)) {
-      throw new Error('[PipeX] Hashing: HMAC verification failed');
+      context.metadata ??= {};
+      context.metadata['verified_hmac'] = attachedHash.toString('hex');
+      return originalData;
+    } finally {
+      expected.fill(0);
     }
-
-    context.metadata ??= {};
-    context.metadata['verified_hmac'] = attachedHash.toString('hex');
-    return originalData;
   }
 
   public createStream(mode: 'compress' | 'decompress', context?: StreamPluginContext): Transform {
@@ -105,7 +108,7 @@ export class HashingPlugin extends BasePlugin {
       });
     } else {
       // Verification mode
-      const chunks: Buffer[] = [];
+      let chunks: Buffer[] = [];
       let total = 0;
 
       return new Transform({
@@ -119,22 +122,30 @@ export class HashingPlugin extends BasePlugin {
         },
         flush(cb) {
           const buffer = Buffer.concat(chunks, total);
-          if (buffer.length < len) {
-            return cb(new Error('[PipeX] Hashing stream: No HMAC found'));
+          chunks = [];
+          let expected: Buffer | undefined;
+          try {
+            if (buffer.length < len) throw new Error('[PipeX] Hashing stream: No HMAC found');
+            const originalData = buffer.subarray(0, buffer.length - len);
+            if (originalData.length > maxOutputBytes) throw new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`);
+            const attachedHash = buffer.subarray(buffer.length - len);
+            hmac.update(originalData);
+            expected = hmac.digest();
+            if (!timingSafeEqual(attachedHash, expected)) {
+              throw new Error('[PipeX] Hashing stream: HMAC verification failed');
+            }
+            const authenticated = Buffer.from(originalData);
+            buffer.fill(0);
+            this.push(authenticated);
+            cb();
+          } catch (error) {
+            buffer.fill(0);
+            cb(error as Error);
+          } finally {
+            expected?.fill(0);
           }
-          const originalData = buffer.subarray(0, buffer.length - len);
-          if (originalData.length > maxOutputBytes) {
-            return cb(new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`));
-          }
-          const attachedHash = buffer.subarray(buffer.length - len);
-          hmac.update(originalData);
-          const expected = hmac.digest();
-          if (!timingSafeEqual(attachedHash, expected)) {
-            return cb(new Error('[PipeX] Hashing stream: HMAC verification failed'));
-          }
-          this.push(originalData);
-          cb();
-        }
+        },
+        destroy(error, callback) { chunks = []; callback(error); },
       });
     }
   }

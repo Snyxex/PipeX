@@ -135,8 +135,10 @@ const collect = async (stream) => {
 // Authenticated stream transforms must not emit tampered plaintext.
 {
   const key = randomBytes(32);
-  const encrypted = await new EncryptionPlugin({ algorithm: 'aes-256-gcm', key }).process(Buffer.from('secret'), {});
-  encrypted[encrypted.length - 1] ^= 1;
+  const encrypted = await new EncryptionPlugin({ algorithm: 'aes-256-gcm', key, frameSizeBytes: 3 }).process(Buffer.from('secret'), {});
+  const firstCiphertextLength = encrypted.readUInt32BE(28 + 9);
+  const firstTagOffset = 28 + 13 + firstCiphertextLength;
+  encrypted[firstTagOffset] ^= 1;
   let leaked = 0;
   await assert.rejects(pipeline(Readable.from([encrypted]), new EncryptionPlugin({ algorithm: 'aes-256-gcm', key }).createStream('decompress'), new Writable({ write(chunk, _encoding, callback) { leaked += chunk.length; callback(); } })));
   assert.equal(leaked, 0);

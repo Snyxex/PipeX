@@ -72,7 +72,16 @@ await engine.stream.pipe(
 );
 ```
 
-Authenticated decryption and HMAC verification withhold plaintext until authentication succeeds. These verification paths buffer data up to the configured hard limit; they are not constant-memory streams.
+Encryption streams use the versioned `PXAE` format and authenticate bounded
+frames before releasing each frame. A final authenticated frame detects
+truncation, while sequence numbers detect reordering and duplication. HMAC
+verification still withholds the complete bounded message because its appended
+digest authenticates the stream only at EOF.
+
+`EncryptionPlugin` defaults to 64 KiB plaintext frames (constrained by
+`maxFrameBytes`). Its v4 writer never emits the old unversioned format. The
+legacy reader is enabled temporarily for migration and can be disabled with
+`allowLegacyDecrypt: false`. See [Encryption v4 migration](./docs/encryption-v4-migration.md).
 
 ## Configuration
 

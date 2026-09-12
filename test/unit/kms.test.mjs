@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createCipheriv, randomBytes } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { Writable } from 'node:stream';
@@ -14,6 +15,17 @@ import {
 
 const dataKey = () => Buffer.alloc(32, 0x5a);
 const envelope = Buffer.from('encrypted-data-key');
+
+function legacyEnvelope(data) {
+  const key = dataKey();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
+  const ciphertext = Buffer.concat([cipher.update(data), cipher.final()]);
+  const keyLength = Buffer.alloc(4);
+  keyLength.writeUInt32BE(envelope.length);
+  key.fill(0);
+  return Buffer.concat([keyLength, envelope, iv, cipher.getAuthTag(), ciphertext]);
+}
 
 function provider(overrides = {}) {
   return {
@@ -42,9 +54,29 @@ test('KMS envelope encryption round-trips and clears plaintext data keys', async
   });
 
   const encrypted = await plugin.process(Buffer.from('sensitive payload'), {});
+  assert.equal(encrypted.subarray(0, 4).toString(), 'PXKM');
+  assert.equal(encrypted.readUInt8(4), 1);
   assert.ok(generated.every(byte => byte === 0));
   assert.equal((await plugin.reverse(encrypted, {})).toString(), 'sensitive payload');
   assert.ok(decrypted.every(byte => byte === 0));
+});
+
+test('KMS authenticates envelope metadata and provides an explicit legacy migration switch', async () => {
+  const plugin = new KmsEncryptionPlugin({ keyId: 'test-key', kms: provider() });
+  const encrypted = await plugin.process(Buffer.from('sensitive payload'), {});
+  for (const offset of [5, 16, encrypted.length - 1]) {
+    const tampered = Buffer.from(encrypted);
+    tampered[offset] ^= 1;
+    await assert.rejects(plugin.reverse(tampered, {}), error => {
+      assert.doesNotMatch(error.message, /sensitive payload/);
+      return true;
+    });
+  }
+
+  const legacy = legacyEnvelope(Buffer.from('legacy payload'));
+  assert.equal((await plugin.reverse(legacy, {})).toString(), 'legacy payload');
+  const strict = new KmsEncryptionPlugin({ keyId: 'test-key', kms: provider(), allowLegacyDecrypt: false });
+  await assert.rejects(strict.reverse(legacy, {}), /legacy format disabled/);
 });
 
 test('KMS failures are typed, sanitized, and clear invalid plaintext keys', async () => {
@@ -109,7 +141,7 @@ test('KMS plugin rejects stream mode before contacting its provider', () => {
   }));
   const destination = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
   assert.deepEqual(engine.pluginCapabilities[0], {
-    plugin: 'kms-encryption@1.0.0',
+    plugin: 'kms-encryption@2.0.0',
     ...getPluginCapabilities(engine.plugins[0]),
   });
   assert.equal(engine.pluginCapabilities[0].reverse, true);

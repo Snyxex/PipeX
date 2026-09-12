@@ -163,8 +163,9 @@ test('standard plugins enforce request limits before expensive or copying work',
   });
 
   const encryption = new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: randomBytes(32) });
-  assert.equal((await encryption.process(input, context(input.length + 29))).length, input.length + 29);
-  await assert.rejects(encryption.process(input, context(input.length + 28)), /Encryption output exceeds/);
+  const encryptedLength = (await encryption.process(input, context(256))).length;
+  assert.equal((await encryption.process(input, context(encryptedLength))).length, encryptedLength);
+  await assert.rejects(encryption.process(input, context(encryptedLength - 1)), /Encryption output exceeds/);
 
   const hashing = new HashingPlugin({ algorithm: 'sha256', secret: '0123456789abcdef' });
   assert.equal((await hashing.process(input, context(input.length + 32))).length, input.length + 32);

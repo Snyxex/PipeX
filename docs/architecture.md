@@ -53,9 +53,19 @@ enforced separately.
 
 - Input, output, frame, retry, timeout, and concurrency limits are enforced by the engine.
 - File paths are resolved against an allowed root using real filesystem paths.
-- AES-GCM, ChaCha20-Poly1305, and HMAC verification do not release plaintext before authentication succeeds.
-- Authentication verification buffers plaintext up to the configured bound. This prevents unauthenticated data exposure, but it is not constant-memory processing.
-- KMS envelope keys are validated and plaintext data keys are zeroed after use.
+- AES-GCM and ChaCha20-Poly1305 use versioned, independently authenticated
+  frames. A frame is never released before its tag verifies. Sequence numbers
+  and an authenticated final frame reject reordering, duplication, and
+  truncation.
+- Encryption memory is bounded by the configured authenticated frame size.
+  Previously authenticated frames may already have been consumed if a later
+  frame or the final marker fails; callers must treat terminal success as the
+  commit point for the complete message.
+- HMAC verification buffers plaintext up to the configured aggregate bound and
+  releases it only after the appended digest verifies.
+- KMS envelopes carry a version, algorithm, explicit lengths, and authenticated
+  metadata. Envelope keys are validated and plaintext data keys are zeroed
+  after use.
 - Event-listener failures are isolated; audit logger failures remain visible to the caller.
 
 PipeX does not provide HTTP authentication, authorization, tenant isolation, secret storage, or network policy. The embedding application owns those boundaries.
@@ -66,6 +76,8 @@ PipeX does not provide HTTP authentication, authorization, tenant isolation, sec
 - File and raw-stream paths use Node.js pipeline backpressure.
 - Buffer slicing uses `subarray()` where ownership permits it.
 - HMAC verification performs one bounded aggregate allocation instead of repeated growing concatenations.
+- Framed encryption and decryption use a fixed-size plaintext/ciphertext buffer
+  per frame rather than buffering the complete stream.
 - Binary compression uses asynchronous native Zlib/Brotli work so CPU-heavy compression does not block the event loop. Stream APIs remain preferable for payloads that should not be held entirely in memory.
 
 ## Plugin contract
