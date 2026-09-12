@@ -143,17 +143,25 @@ export class BinaryController {
    * Overload 1: undo(result)               — uses result.originalType
    * Overload 2: undo(buffer, forceType)    — for externally produced buffers
    */
-  async undo<T = unknown>(result: EngineResult): Promise<T>;
-  async undo<T = unknown>(input: Buffer, forceType: string): Promise<T>;
+  async undo<T = unknown>(result: EngineResult, options?: OperationOptions): Promise<T>;
+  async undo<T = unknown>(input: Buffer, forceType: string, options?: OperationOptions): Promise<T>;
   async undo<T = unknown>(
     inputOrResult: Buffer | EngineResult,
-    forceType?: string,
+    forceTypeOrOptions?: string | OperationOptions,
+    operationOptions: OperationOptions = {},
   ): Promise<T> {
     const isResult   = !Buffer.isBuffer(inputOrResult);
+    if (!isResult && (typeof forceTypeOrOptions !== 'string' || forceTypeOrOptions.length === 0)) {
+      throw new Error('[PipeX] binary.undo(buffer, forceType) requires a non-empty forceType');
+    }
     let   data       = isResult ? (inputOrResult as EngineResult).data : (inputOrResult as Buffer);
     const origType   = isResult
       ? (inputOrResult as EngineResult).originalType
-      : (forceType as string);
+      : (forceTypeOrOptions as string);
+    const options = isResult && typeof forceTypeOrOptions === 'object'
+      ? forceTypeOrOptions
+      : operationOptions;
+    const signal = this.#engine.createOperationSignal(options);
 
     const requestId  = this.#engine.startRequest({ operation: 'undo', originalType: origType });
     const span = this.#engine.tracer?.startSpan('binary:undo', { requestId } as any);
@@ -190,6 +198,7 @@ export class BinaryController {
     }
 
     try {
+      signal.throwIfAborted();
       for (const plugin of [...this.#engine.plugins].reverse()) {
         if (typeof plugin.reverse !== 'function') continue;
         
@@ -197,8 +206,13 @@ export class BinaryController {
         pSpan?.setAttribute('mode', 'reverse');
         
         try {
-          const ctx = makeContext(requestId, { originalType: origType }, this.#engine.logger, pSpan);
-          data = await withRetry(() => plugin.reverse!(data, ctx), plugin.retryOptions, this.#engine.logger);
+          const ctx = makeContext(requestId, { originalType: origType }, this.#engine.logger, pSpan, signal);
+          data = await withRetry(
+            () => plugin.reverse!(data, ctx),
+            plugin.retryOptions,
+            this.#engine.logger,
+            { signal, limits: this.#engine.limits },
+          );
           if (data.length > this.#engine.limits.maxOutputBytes) throw new Error('[PipeX] Plugin output exceeds configured limit');
         } catch (e) {
           pSpan?.setAttribute('error', true);

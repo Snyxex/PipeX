@@ -26,6 +26,34 @@ const collect = async (stream) => {
   );
 }
 
+// Reverse operations honor cancellation and release their concurrency slot.
+{
+  const engine = new DataEngine({ maxConcurrentOperations: 1 }).use({
+    name: 'identity',
+    version: '1.0.0',
+    process: data => data,
+    reverse: data => data,
+  });
+  const result = await engine.binary.run(Buffer.from('cancel me'));
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(engine.binary.undo(result, { signal: controller.signal }), /abort/i);
+  assert.equal((await engine.binary.run(Buffer.from('slot released'))).data.toString(), 'slot released');
+}
+
+// A plugin that fails while constructing its native stream must not leak an
+// active request into the engine's concurrency limiter.
+{
+  const engine = new DataEngine({ maxConcurrentOperations: 1 }).use({
+    name: 'broken-stream',
+    version: '1.0.0',
+    process: data => data,
+    createStream() { throw new Error('stream setup failed'); },
+  });
+  assert.throws(() => engine.stream.into(new Writable({ write(_chunk, _encoding, callback) { callback(); } })), /stream setup failed/);
+  assert.equal((await engine.binary.run(Buffer.from('slot released'))).data.toString(), 'slot released');
+}
+
 // Duplex pack/unpack must preserve object frames.
 {
   const engine = new DataEngine();

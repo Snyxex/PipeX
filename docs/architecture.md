@@ -10,7 +10,7 @@ Core helpers in `src/core/core.ts` implement serialization, retry behavior, mani
 
 ### Binary transformations
 
-`binary.run(value)` converts the value to a buffer, applies plugins in registration order, and returns an `EngineResult`. `binary.undo(result)` applies reversible plugins in reverse order and restores the original JavaScript type.
+`binary.run(value)` converts the value to a buffer, applies plugins in registration order, and returns an `EngineResult`. `binary.undo(result, options)` applies reversible plugins in reverse order, honors cancellation and deadlines, and restores the original JavaScript type.
 
 The `EngineResult.pipeline` field records the plugin identifiers used by the operation. It is metadata, not a cryptographic signature.
 

@@ -67,14 +67,20 @@ export class StreamController {
     if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw byte streams');
     const requestId  = this.#engine.startRequest();
     const context = this.#streamContext(requestId, signal);
-    const transforms = buildTransformChain(
-      this.#engine.plugins, 'compress', false,
-      bytes => this.#engine.emitProgress(bytes, requestId),
-      this.#engine.logger,
-      this.#engine.tracer,
-      this.#engine.dlq,
-      context,
-    );
+    let transforms: ReturnType<typeof buildTransformChain>;
+    try {
+      transforms = buildTransformChain(
+        this.#engine.plugins, 'compress', false,
+        bytes => this.#engine.emitProgress(bytes, requestId),
+        this.#engine.logger,
+        this.#engine.tracer,
+        this.#engine.dlq,
+        context,
+      );
+    } catch (error) {
+      this.#engine.emitError(error, requestId);
+      throw error;
+    }
     const entry = new PassThrough();
     runPipeline(entry, [buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'), ...transforms, buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output')], destination, { signal })
       .then(() => this.#engine.endRequest(requestId))
@@ -97,14 +103,20 @@ export class StreamController {
     if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw byte streams');
     const requestId  = this.#engine.startRequest();
     const context = this.#streamContext(requestId, signal);
-    const transforms = buildTransformChain(
-      this.#engine.plugins, 'decompress', true,
-      bytes => this.#engine.emitProgress(bytes, requestId),
-      this.#engine.logger,
-      this.#engine.tracer,
-      this.#engine.dlq,
-      context,
-    );
+    let transforms: ReturnType<typeof buildTransformChain>;
+    try {
+      transforms = buildTransformChain(
+        this.#engine.plugins, 'decompress', true,
+        bytes => this.#engine.emitProgress(bytes, requestId),
+        this.#engine.logger,
+        this.#engine.tracer,
+        this.#engine.dlq,
+        context,
+      );
+    } catch (error) {
+      this.#engine.emitError(error, requestId);
+      throw error;
+    }
     const entry = new PassThrough();
     runPipeline(entry, [buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'), ...transforms, buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output')], destination, { signal })
       .then(() => this.#engine.endRequest(requestId))
@@ -206,15 +218,15 @@ export class StreamController {
     const requestId  = this.#engine.startRequest();
     const mode       = reverse ? 'decompress' : 'compress';
     const context = this.#streamContext(requestId, signal);
-    const transforms = buildTransformChain(
-      this.#engine.plugins, mode, reverse,
-      bytes => this.#engine.emitProgress(bytes, requestId),
-      this.#engine.logger,
-      this.#engine.tracer,
-      this.#engine.dlq,
-      context,
-    );
     try {
+      const transforms = buildTransformChain(
+        this.#engine.plugins, mode, reverse,
+        bytes => this.#engine.emitProgress(bytes, requestId),
+        this.#engine.logger,
+        this.#engine.tracer,
+        this.#engine.dlq,
+        context,
+      );
       await runPipeline(source, [
         buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'),
         ...transforms,

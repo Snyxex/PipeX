@@ -29,7 +29,7 @@ const engine = new DataEngine({
   .use(new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: randomBytes(32) }));
 
 const result = await engine.binary.run({ id: 1, username: 'dev' });
-const restored = await engine.binary.undo(result);
+const restored = await engine.binary.undo(result, { timeoutMs: 30_000 });
 ```
 
 Keep encryption keys outside source control and load them from a secret manager or KMS in production.
