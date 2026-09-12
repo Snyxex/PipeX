@@ -1,6 +1,6 @@
 {
   "name": "pipex",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "PipeX — A lightweight, modular data transformation engine. Effortlessly chain compression, encryption, and hashing through a unified stream-based architecture.",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
