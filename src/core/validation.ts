@@ -65,8 +65,9 @@ export class ValidationPlugin extends BasePlugin {
       },
       flush: (cb) => {
         try {
-          this.validate(Buffer.concat(chunks));
-          cb(null, Buffer.concat(chunks));
+          const data = Buffer.concat(chunks, total);
+          this.validate(data);
+          cb(null, data);
         } catch (error) { cb(error as Error); }
       },
     });

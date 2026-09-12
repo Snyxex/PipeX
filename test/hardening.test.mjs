@@ -46,6 +46,17 @@ const collect = async (stream) => {
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 
+// HMAC stream verification must round-trip fragmented input without quadratic
+// buffer concatenation or releasing bytes before authentication succeeds.
+{
+  const source = Buffer.alloc(2 * 1024 * 1024, 0x5a);
+  const plugin = new HashingPlugin({ algorithm: 'sha256', secret: '0123456789abcdef' });
+  const tagged = await plugin.process(source, {});
+  const fragments = Array.from({ length: 2048 }, (_, i) => tagged.subarray(i * Math.ceil(tagged.length / 2048), (i + 1) * Math.ceil(tagged.length / 2048)));
+  const restored = await collect(Readable.from(fragments).pipe(plugin.createStream('decompress')));
+  assert.deepEqual(restored, source);
+}
+
 // Built worker artifact must be loadable from the packed build.
 {
   const plugin = new WorkerPoolPlugin({ maxThreads: 1 });

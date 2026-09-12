@@ -33,10 +33,13 @@ export class HashingPlugin extends BasePlugin {
   }
 
   public override async process(data: Buffer, context: ProcessorContext): Promise<Buffer> {
+    if (data.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] Hashing input exceeds 256 MiB');
     const hmac = createHmac(this.options.algorithm, this.options.secret);
     const digest = hmac.update(data).digest();
     context.metadata['hmac'] = digest.toString('hex');
-    return Buffer.concat([data, digest]);
+    const result = Buffer.concat([data, digest]);
+    if (result.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] Hashing output exceeds 256 MiB');
+    return result;
   }
 
   public override async reverse(data: Buffer, context: ProcessorContext): Promise<Buffer> {
@@ -76,33 +79,29 @@ export class HashingPlugin extends BasePlugin {
       });
     } else {
       // Verification mode
-      let buffer = Buffer.alloc(0);
+      const chunks: Buffer[] = [];
       let total = 0;
-      const verifiedChunks: Buffer[] = [];
 
       return new Transform({
         transform(chunk: Buffer, _enc, cb) {
           total += chunk.length;
           if (total > MAX_BUFFER_BYTES) return cb(new Error('[PipeX] HMAC stream exceeds 256 MiB'));
-          buffer = Buffer.concat([buffer, chunk]);
-          // Keep at least len bytes in the buffer to avoid hashing the trailing HMAC
-          if (buffer.length > len) {
-            const toProcess = buffer.subarray(0, buffer.length - len);
-            hmac.update(toProcess);
-            verifiedChunks.push(toProcess);
-            buffer = buffer.subarray(buffer.length - len);
-          }
+          chunks.push(chunk);
           cb();
         },
         flush(cb) {
-          if (buffer.length !== len) {
+          const buffer = Buffer.concat(chunks, total);
+          if (buffer.length < len) {
             return cb(new Error('[PipeX] Hashing stream: No HMAC found'));
           }
+          const originalData = buffer.subarray(0, buffer.length - len);
+          const attachedHash = buffer.subarray(buffer.length - len);
+          hmac.update(originalData);
           const expected = hmac.digest();
-          if (!timingSafeEqual(buffer, expected)) {
+          if (!timingSafeEqual(attachedHash, expected)) {
             return cb(new Error('[PipeX] Hashing stream: HMAC verification failed'));
           }
-          this.push(Buffer.concat(verifiedChunks));
+          this.push(originalData);
           cb();
         }
       });
