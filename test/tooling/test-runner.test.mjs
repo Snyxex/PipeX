@@ -66,4 +66,19 @@ test('every automated test belongs to an explicit suite', async () => {
   const workflow = await readFile(resolve('.github/workflows/ci.yml'), 'utf8');
   assert.match(workflow, /npm run test:performance/);
   assert.doesNotMatch(workflow, /benchmark:large/);
+  assert.match(workflow, /node: \[20\.19\.0, 22\.x, 24\.x\]/);
+  assert.match(workflow, /permissions:\s+contents: read/);
+  assert.match(workflow, /npm ci --ignore-scripts --no-audit --no-fund/);
+  assert.match(workflow, /npm audit --audit-level=high/);
+  assert.doesNotMatch(workflow, /pull_request_target|continue-on-error|secrets\./);
+  assert.doesNotMatch(manifest.scripts['quality:ci'], /benchmark/);
+  for (const command of manifest.scripts['quality:ci'].split(' && ')) {
+    assert.ok(workflow.includes(`run: ${command}`), `${command} is missing from CI`);
+  }
+
+  const uses = [...workflow.matchAll(/^\s*uses:\s*(\S+)/gm)].map(match => match[1]);
+  assert.ok(uses.length > 0, 'CI must use at least one action');
+  for (const action of uses) {
+    assert.match(action, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, `${action} is not pinned to a commit SHA`);
+  }
 });

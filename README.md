@@ -154,6 +154,7 @@ See [Architecture](./docs/architecture.md) and [Production operations](./docs/en
 
 ```bash
 npm ci
+npm run quality:ci
 npm test
 npm run test:unit
 npm run test:integration
@@ -167,6 +168,19 @@ npm pack --dry-run
 `npm test` performs the production TypeScript check, build, test-runner checks,
 unit tests, integration tests, behavioral security regressions, and package
 sanity checks. `test:performance` is a short CI-safe smoke suite.
+
+`npm run quality:ci` is the local equivalent of the CI quality job. It builds
+once, runs every automated suite (including the short performance/backpressure
+smoke tests), and validates the exact `npm pack --dry-run` payload. CI runs this
+sequence on Node.js 20.19.0 plus the latest Node.js 22 and 24 releases. Node
+20.19.0 is the declared minimum; current releases are used for the other active
+major lines so security and compatibility fixes are exercised continuously.
+CI installs with lifecycle scripts disabled, then invokes the trusted project
+build explicitly.
+
+The separate dependency-audit job checks runtime and development dependencies
+with `npm audit --audit-level=high`. High and critical advisories are blocking;
+moderate and low advisories remain visible in the report without failing CI.
 
 Large throughput work is intentionally excluded from `npm test` and CI. Run it
 manually with `npm run benchmark:large`; set `PIPEX_BENCHMARK_BYTES` to override
