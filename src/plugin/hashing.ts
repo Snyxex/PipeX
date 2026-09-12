@@ -34,6 +34,7 @@ export class HashingPlugin extends BasePlugin {
 
   public override async process(data: Buffer, context: ProcessorContext): Promise<Buffer> {
     if (data.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] Hashing input exceeds 256 MiB');
+    context.metadata ??= {};
     const hmac = createHmac(this.options.algorithm, this.options.secret);
     const digest = hmac.update(data).digest();
     context.metadata['hmac'] = digest.toString('hex');
@@ -56,6 +57,7 @@ export class HashingPlugin extends BasePlugin {
       throw new Error('[PipeX] Hashing: HMAC verification failed');
     }
 
+    context.metadata ??= {};
     context.metadata['verified_hmac'] = attachedHash.toString('hex');
     return originalData;
   }

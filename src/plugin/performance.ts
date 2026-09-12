@@ -10,6 +10,7 @@ export class BenchmarkPlugin extends BasePlugin {
   public readonly version = '2.0.0';
 
   public override async process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
+    ctx.metadata ??= {};
     const start = ctx.metadata['benchmark:start'] as number || Date.now();
     ctx.metadata['benchmark:in_bytes'] = data.length;
     ctx.metadata['benchmark:start'] = start;
@@ -17,6 +18,7 @@ export class BenchmarkPlugin extends BasePlugin {
   }
 
   public override async reverse(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
+    ctx.metadata ??= {};
     ctx.metadata['benchmark:out_bytes'] = data.length;
     const start = ctx.metadata['benchmark:start'] as number;
     if (start) {
