@@ -55,7 +55,7 @@ PipeX does not provide HTTP authentication, authorization, tenant isolation, sec
 - File and raw-stream paths use Node.js pipeline backpressure.
 - Buffer slicing uses `subarray()` where ownership permits it.
 - HMAC verification performs one bounded aggregate allocation instead of repeated growing concatenations.
-- CPU-heavy synchronous binary compression runs on the caller thread. Prefer stream APIs or a worker strategy for large payloads.
+- Binary compression uses asynchronous native Zlib/Brotli work so CPU-heavy compression does not block the event loop. Stream APIs remain preferable for payloads that should not be held entirely in memory.
 
 ## Plugin contract
 

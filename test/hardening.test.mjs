@@ -118,6 +118,22 @@ const collect = async (stream) => {
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 
+// Binary compression uses asynchronous zlib work and preserves round trips.
+{
+  assert.throws(() => new CompressionPlugin({ type: 'gzip', level: 10 }), /gzip level/);
+  const source = randomBytes(8 * 1024 * 1024);
+  const plugin = new CompressionPlugin({ type: 'brotli', level: 4 });
+  const order = [];
+  const compressedPromise = plugin.process(source, {}).then(value => {
+    order.push('compressed');
+    return value;
+  });
+  await new Promise(resolve => setImmediate(() => { order.push('event-loop'); resolve(); }));
+  const compressed = await compressedPromise;
+  assert.equal(order[0], 'event-loop');
+  assert.deepEqual(await plugin.reverse(compressed, {}), source);
+}
+
 // HMAC stream verification must round-trip fragmented input without quadratic
 // buffer concatenation or releasing bytes before authentication succeeds.
 {

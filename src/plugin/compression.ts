@@ -1,8 +1,9 @@
 import { 
-  gzipSync, gunzipSync, createGzip, createGunzip,
-  brotliCompressSync, brotliDecompressSync, createBrotliCompress, createBrotliDecompress,
+  gzip, gunzip, createGzip, createGunzip,
+  brotliCompress, brotliDecompress, createBrotliCompress, createBrotliDecompress,
   constants as zlibConstants
 } from 'node:zlib';
+import { promisify } from 'node:util';
 import { Transform, type TransformCallback } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
 import type { ProcessorContext } from '../core/types.js';
@@ -25,6 +26,11 @@ const ID_TO_TYPE: Record<number, CompressionType> = {
   1: 'gzip',
   2: 'brotli',
 };
+const MAX_BUFFER_BYTES = 256 * 1024 * 1024;
+const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
+const brotliCompressAsync = promisify(brotliCompress);
+const brotliDecompressAsync = promisify(brotliDecompress);
 
 /**
  * CompressionPlugin — Standard library plugin for Gzip and Brotli.
@@ -37,22 +43,32 @@ export class CompressionPlugin extends BasePlugin {
   constructor(protected override options: CompressionOptions) {
     super(options);
     if (!(options.type in TYPE_BYTE_MAP)) throw new Error('[PipeX] Compression: unknown type');
-    if (options.level !== undefined && (!Number.isInteger(options.level) || options.level < 0 || options.level > 11)) {
-      throw new Error('[PipeX] Compression: level must be an integer between 0 and 11');
+    if (options.level !== undefined && !Number.isInteger(options.level)) {
+      throw new Error('[PipeX] Compression: level must be an integer');
+    }
+    if (options.type === 'gzip' && options.level !== undefined && (options.level < 0 || options.level > 9)) {
+      throw new Error('[PipeX] Compression: gzip level must be between 0 and 9');
+    }
+    if (options.type === 'brotli' && options.level !== undefined && (options.level < 0 || options.level > 11)) {
+      throw new Error('[PipeX] Compression: Brotli level must be between 0 and 11');
+    }
+    if (options.type === 'none' && options.level !== undefined) {
+      throw new Error('[PipeX] Compression: level is not supported when type is none');
     }
   }
 
   public override async process(data: Buffer, _ctx: ProcessorContext): Promise<Buffer> {
-    if (data.length > 256 * 1024 * 1024) throw new Error('[PipeX] Compression input exceeds 256 MiB');
+    if (data.length > MAX_BUFFER_BYTES) throw new Error('[PipeX] Compression input exceeds 256 MiB');
     const { type, level } = this.options;
     const header = Buffer.from([TYPE_BYTE_MAP[type]]);
 
     let compressed: Buffer;
     if (type === 'gzip') {
-      compressed = gzipSync(data, { level: level ?? 6 });
+      compressed = await gzipAsync(data, { level: level ?? 6, maxOutputLength: MAX_BUFFER_BYTES });
     } else if (type === 'brotli') {
-      compressed = brotliCompressSync(data, {
-        params: { [zlibConstants.BROTLI_PARAM_QUALITY]: level ?? 11 }
+      compressed = await brotliCompressAsync(data, {
+        params: { [zlibConstants.BROTLI_PARAM_QUALITY]: level ?? 11 },
+        maxOutputLength: MAX_BUFFER_BYTES,
       });
     } else {
       compressed = data;
@@ -69,13 +85,11 @@ export class CompressionPlugin extends BasePlugin {
     const payload = data.subarray(1);
 
     if (type === 'gzip') {
-      const out = gunzipSync(payload);
-      if (out.length > 256 * 1024 * 1024) throw new Error('[PipeX] Decompressed output exceeds 256 MiB');
+      const out = await gunzipAsync(payload, { maxOutputLength: MAX_BUFFER_BYTES });
       return out;
     }
     if (type === 'brotli') {
-      const out = brotliDecompressSync(payload);
-      if (out.length > 256 * 1024 * 1024) throw new Error('[PipeX] Decompressed output exceeds 256 MiB');
+      const out = await brotliDecompressAsync(payload, { maxOutputLength: MAX_BUFFER_BYTES });
       return out;
     }
     if (type !== 'none') throw new Error('[PipeX] Compression: unknown type');
