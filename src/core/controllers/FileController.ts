@@ -65,8 +65,8 @@ export class FileController {
    * Source file → Plugin pipeline (compress) → Destination file.
    */
   async process(inputPath: string, outputPath: string, allowedRoot?: string, options: OperationOptions = {}): Promise<void> {
-    const requestId = this.#engine.startRequest();
     const signal = this.#engine.createOperationSignal(options);
+    const requestId = this.#engine.startRequest();
     try {
       if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw file streams');
       await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, async (input, temporary) => {
@@ -81,6 +81,7 @@ export class FileController {
         await runPipeline(src, transforms, dst, { signal });
       });
       this.#engine.endRequest(requestId);
+      await this.#engine.emitAudit({ requestId, operation: 'process', metadata: { controller: 'file' } });
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
       throw err;
@@ -91,8 +92,8 @@ export class FileController {
    * Source file → Plugin pipeline (decompress, reversed) → Destination file.
    */
   async reverse(inputPath: string, outputPath: string, allowedRoot?: string, options: OperationOptions = {}): Promise<void> {
-    const requestId = this.#engine.startRequest();
     const signal = this.#engine.createOperationSignal(options);
+    const requestId = this.#engine.startRequest();
     try {
       if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw file streams');
       await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, async (input, temporary) => {
@@ -107,6 +108,7 @@ export class FileController {
         await runPipeline(src, transforms, dst, { signal });
       });
       this.#engine.endRequest(requestId);
+      await this.#engine.emitAudit({ requestId, operation: 'reverse', metadata: { controller: 'file' } });
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
       throw err;
@@ -120,8 +122,8 @@ export class FileController {
    * The manifest encodes the plugin chain so reverse() is self-healing.
    */
   async pack(inputPath: string, outputPath: string, allowedRoot?: string, options: OperationOptions = {}): Promise<void> {
-    const requestId = this.#engine.startRequest();
     const signal = this.#engine.createOperationSignal(options);
+    const requestId = this.#engine.startRequest();
     try {
       await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, async (input, temporary) => {
         const src = createReadStream(input, { highWaterMark: DEFAULT_HIGH_WATER });
@@ -135,6 +137,7 @@ export class FileController {
         await runPipeline(src, transforms, dst, { signal });
       });
       this.#engine.endRequest(requestId);
+      await this.#engine.emitAudit({ requestId, operation: 'pack', metadata: { controller: 'file' } });
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
       throw err;
@@ -147,8 +150,8 @@ export class FileController {
    * Fires 'manifest' event with the recovered PipeXManifest before streaming data.
    */
   async unpack(inputPath: string, outputPath: string, allowedRoot?: string, options: OperationOptions = {}): Promise<void> {
-    const requestId = this.#engine.startRequest();
     const signal = this.#engine.createOperationSignal(options);
+    const requestId = this.#engine.startRequest();
     try {
       await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, async (input, temporary) => {
         const src = createReadStream(input, { highWaterMark: DEFAULT_HIGH_WATER });
@@ -181,6 +184,7 @@ export class FileController {
         ], dst, { signal });
       });
       this.#engine.endRequest(requestId);
+      await this.#engine.emitAudit({ requestId, operation: 'unpack', metadata: { controller: 'file' } });
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
       throw err;

@@ -83,7 +83,11 @@ export class StreamController {
     }
     const entry = new PassThrough();
     runPipeline(entry, [buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'), ...transforms, buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output')], destination, { signal })
-      .then(() => this.#engine.endRequest(requestId))
+      .then(() => {
+        this.#engine.endRequest(requestId);
+        void this.#engine.emitAudit({ requestId, operation: 'process', metadata: { controller: 'stream' } })
+          .catch(error => this.#engine.emitError(error, requestId));
+      })
       .catch(err => {
         this.#engine.emitError(err, requestId);
         entry.destroy(err instanceof Error ? err : new Error(String(err)));
@@ -119,7 +123,11 @@ export class StreamController {
     }
     const entry = new PassThrough();
     runPipeline(entry, [buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'), ...transforms, buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output')], destination, { signal })
-      .then(() => this.#engine.endRequest(requestId))
+      .then(() => {
+        this.#engine.endRequest(requestId);
+        void this.#engine.emitAudit({ requestId, operation: 'reverse', metadata: { controller: 'stream' } })
+          .catch(error => this.#engine.emitError(error, requestId));
+      })
       .catch(err => {
         this.#engine.emitError(err, requestId);
         entry.destroy(err instanceof Error ? err : new Error(String(err)));
@@ -135,8 +143,8 @@ export class StreamController {
    * objectSource.pipe(engine.stream.pack()).pipe(tcpSocket);
    */
   pack(options: OperationOptions = {}): Duplex {
-    const requestId = this.#engine.startRequest({ operation: 'pack' });
     const signal = this.#engine.createOperationSignal(options);
+    const requestId = this.#engine.startRequest({ operation: 'pack' });
     const input = new PassThrough({ objectMode: true });
     const output = new PassThrough();
     const transforms = [
@@ -147,7 +155,11 @@ export class StreamController {
     ];
     const duplex = this.#bridge(input, output, true);
     runPipeline(input, transforms, output, { signal })
-      .then(() => this.#engine.endRequest(requestId))
+      .then(() => {
+        this.#engine.endRequest(requestId);
+        void this.#engine.emitAudit({ requestId, operation: 'pack', metadata: { controller: 'stream' } })
+          .catch(error => this.#engine.emitError(error, requestId));
+      })
       .catch(error => {
         this.#engine.emitError(error, requestId);
         duplex.destroy(error instanceof Error ? error : new Error(String(error)));
@@ -164,8 +176,8 @@ export class StreamController {
    * tcpSocket.pipe(engine.stream.unpack()).on('data', obj => console.log(obj));
    */
   unpack(options: OperationOptions = {}): Duplex {
-    const requestId = this.#engine.startRequest({ operation: 'unpack' });
     const signal = this.#engine.createOperationSignal(options);
+    const requestId = this.#engine.startRequest({ operation: 'unpack' });
     const input = new PassThrough();
     const output = new PassThrough({ objectMode: true });
     const unpacker = createUnpackrStream(this.#engine.limits.maxInputBytes);
@@ -193,7 +205,11 @@ export class StreamController {
     ];
     const duplex = this.#bridge(input, output, true);
     runPipeline(input, transforms, output, { signal })
-      .then(() => this.#engine.endRequest(requestId))
+      .then(() => {
+        this.#engine.endRequest(requestId);
+        void this.#engine.emitAudit({ requestId, operation: 'unpack', metadata: { controller: 'stream' } })
+          .catch(error => this.#engine.emitError(error, requestId));
+      })
       .catch(error => {
         this.#engine.emitError(error, requestId);
         duplex.destroy(error instanceof Error ? error : new Error(String(error)));
@@ -233,6 +249,11 @@ export class StreamController {
         buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),
       ], destination, { signal });
       this.#engine.endRequest(requestId);
+      await this.#engine.emitAudit({
+        requestId,
+        operation: reverse ? 'reverse' : 'process',
+        metadata: { controller: 'stream' },
+      });
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
       throw err;

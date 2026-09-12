@@ -80,6 +80,8 @@ engine.setAuditLogger({
 
 Audit records include request ID, operation, plugin chain, timestamp, and operation metadata. They do not contain payload bytes.
 
+Binary, file, and stream controllers emit the same audit record shape. Awaitable APIs propagate audit-sink failures to the caller. Adapter APIs that return a stream (`into`, `reverseInto`, `pack`, and `unpack`) report asynchronous audit failures through the engine's `error` event because their data stream may already be complete.
+
 ## Deployment checklist
 
 - Use `npm ci` with the committed lockfile.

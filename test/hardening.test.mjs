@@ -65,6 +65,17 @@ const collect = async (stream) => {
   assert.equal((await engine.binary.run(Buffer.from('slot released'))).data.toString(), 'slot released');
 }
 
+// Invalid operation options are rejected before reserving concurrency slots.
+{
+  const engine = new DataEngine({ maxConcurrentOperations: 1 });
+  assert.throws(() => engine.stream.pack({ timeoutMs: -1 }), /Invalid operation timeout/);
+  await assert.rejects(
+    engine.file.process('missing-input', 'unused-output', undefined, { timeoutMs: -1 }),
+    /Invalid operation timeout/,
+  );
+  assert.equal((await engine.binary.run(Buffer.from('slot available'))).data.toString(), 'slot available');
+}
+
 // Public plugin state is immutable and cannot change during an operation.
 {
   let release;
@@ -115,6 +126,27 @@ const collect = async (stream) => {
     await writeFile(input, 'must survive');
     await assert.rejects(new DataEngine().file.process(input, input, root), /different files/);
     assert.equal((await readFile(input, 'utf8')), 'must survive');
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+
+// Awaitable file and stream operations emit consistent audit records.
+{
+  const records = [];
+  const engine = new DataEngine().setAuditLogger({ log: record => { records.push(record); } });
+  const root = await mkdtemp(join(tmpdir(), 'pipex-audit-'));
+  try {
+    const input = join(root, 'input.bin');
+    const output = join(root, 'output.bin');
+    await writeFile(input, 'audit me');
+    await engine.file.process(input, output, root);
+    await engine.stream.pipe(
+      Readable.from([Buffer.from('stream audit')]),
+      new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+    );
+    assert.deepEqual(records.map(record => [record.operation, record.metadata.controller]), [
+      ['process', 'file'],
+      ['process', 'stream'],
+    ]);
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 
