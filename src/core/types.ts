@@ -1,4 +1,4 @@
-import type { Duplex } from 'node:stream';
+import type { Duplex, Writable } from 'node:stream';
 import { z } from 'zod';
 
 // ─── Observability Types ──────────────────────────────────────────────────────
@@ -78,9 +78,13 @@ export interface SchemaRegistry {
 
 export interface EngineConfig {
   plugins?: { name: string; options?: unknown }[];
-  logging?: { enabled: boolean; level?: string };
-  tracing?: { enabled: boolean };
-  dlq?:     { path: string };
+  limits?: Partial<EngineLimits>;
+  logger?: Logger;
+  tracer?: Tracer;
+  auditLogger?: AuditLogger;
+  dlq?: Writable;
+  schema?: z.ZodType<any>;
+  schemaRegistry?: SchemaRegistry;
 }
 
 // ─── Core types ───────────────────────────────────────────────────────────────

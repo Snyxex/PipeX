@@ -62,9 +62,17 @@ export class DataEngine extends EventEmitter {
    */
   public static async fromConfig(config: EngineConfig): Promise<DataEngine> {
     if (!config || typeof config !== 'object') throw new Error('[PipeX] Configuration must be an object');
-    const engine = new DataEngine();
+    const engine = new DataEngine(config.limits);
+
+    if (config.logger) engine.setLogger(config.logger);
+    if (config.tracer) engine.setTracer(config.tracer);
+    if (config.auditLogger) engine.setAuditLogger(config.auditLogger);
+    if (config.dlq) engine.setDlq(config.dlq);
+    if (config.schemaRegistry) engine.setSchemaRegistry(config.schemaRegistry);
+    if (config.schema) engine.setSchema(config.schema);
     
     if (config.plugins) {
+      if (!Array.isArray(config.plugins)) throw new Error('[PipeX] Configuration plugins must be an array');
       for (const p of config.plugins) {
         const createPlugin = this.pluginRegistry.get(p.name);
         if (!createPlugin) throw new Error(`[PipeX] Unknown plugin in config: ${p.name}`);
@@ -147,6 +155,7 @@ export class DataEngine extends EventEmitter {
    * @param stream The writable stream to use as a DLQ.
    */
   setDlq(stream: Writable): this {
+    if (!stream || typeof stream.write !== 'function') throw new Error('[PipeX] DLQ must be a writable stream');
     this.#dlq = stream;
     return this;
   }
@@ -163,6 +172,9 @@ export class DataEngine extends EventEmitter {
    * @param logger The logger instance.
    */
   setLogger(logger: Logger): this {
+    if (!logger || !['info', 'warn', 'error', 'debug'].every(level => typeof logger[level as keyof Logger] === 'function')) {
+      throw new Error('[PipeX] Logger must implement info, warn, error, and debug');
+    }
     this.#logger = logger;
     return this;
   }
@@ -178,6 +190,7 @@ export class DataEngine extends EventEmitter {
    * @param tracer The tracer instance.
    */
   setTracer(tracer: Tracer): this {
+    if (!tracer || typeof tracer.startSpan !== 'function') throw new Error('[PipeX] Tracer must implement startSpan');
     this.#tracer = tracer;
     return this;
   }
@@ -193,6 +206,7 @@ export class DataEngine extends EventEmitter {
    * @param logger The audit logger instance.
    */
   setAuditLogger(logger: AuditLogger): this {
+    if (!logger || typeof logger.log !== 'function') throw new Error('[PipeX] Audit logger must implement log');
     this.#auditLogger = logger;
     return this;
   }
@@ -219,6 +233,7 @@ export class DataEngine extends EventEmitter {
    * @param registry The schema registry provider.
    */
   setSchemaRegistry(registry: SchemaRegistry): this {
+    if (!registry || typeof registry.getSchema !== 'function') throw new Error('[PipeX] Schema registry must implement getSchema');
     this.#registry = registry;
     return this;
   }
@@ -240,6 +255,7 @@ export class DataEngine extends EventEmitter {
    * When set, controllers will automatically validate data against this schema.
    */
   setSchema(schema: z.ZodType<any>): this {
+    if (!schema || typeof schema.safeParse !== 'function') throw new Error('[PipeX] Schema must implement safeParse');
     this.#schema = schema;
     return this;
   }

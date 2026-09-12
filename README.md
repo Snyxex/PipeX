@@ -80,6 +80,9 @@ Built-in plugins are registered automatically:
 
 ```ts
 const engine = await DataEngine.fromConfig({
+  limits: { maxInputBytes: 32 * 1024 * 1024, operationTimeoutMs: 15_000 },
+  logger,
+  auditLogger,
   plugins: [
     { name: 'compression', options: { type: 'brotli', level: 5 } },
     { name: 'hashing', options: { algorithm: 'sha256', secret: process.env.PIPEX_HMAC_SECRET } },
@@ -91,6 +94,8 @@ console.log(engine.pipeline);
 ```
 
 Available names are `compression`, `encryption`, `hashing`, `benchmark`, `worker-pool`, `validation`, and `kms-encryption`. Options containing runtime objects, such as Zod schemas or KMS providers, must be supplied programmatically.
+
+`fromConfig()` also accepts `limits`, `logger`, `tracer`, `auditLogger`, `dlq`, `schema`, and `schemaRegistry`. Integration objects are validated immediately so configuration mistakes fail during startup.
 
 Register a custom plugin with `DataEngine.registerPlugin('redact', RedactPlugin)`.
 

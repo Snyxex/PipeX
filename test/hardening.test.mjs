@@ -16,10 +16,21 @@ const collect = async (stream) => {
 // Config-driven setup includes the standard plugin registry and exposes the
 // effective pipeline without requiring consumers to register built-ins.
 {
+  const messages = [];
   const engine = await DataEngine.fromConfig({
+    limits: { maxConcurrentOperations: 2, operationTimeoutMs: 5_000 },
+    logger: {
+      info: message => messages.push(message),
+      warn() {},
+      error() {},
+      debug() {},
+    },
     plugins: [{ name: 'compression', options: { type: 'gzip', level: 1 } }],
   });
   assert.deepEqual(engine.pipeline, ['compression@3.0.0']);
+  assert.equal(engine.limits.maxConcurrentOperations, 2);
+  await engine.binary.run(Buffer.from('configured'));
+  assert.ok(messages.some(message => message.includes('Request started')));
   await assert.rejects(
     DataEngine.fromConfig({ plugins: [{ name: 'compression', options: { type: 'invalid' } }] }),
     /Failed to initialize plugin "compression"/,
