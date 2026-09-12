@@ -9,6 +9,7 @@ import {
   OperationAbortedError,
   OperationTimeoutError,
   UnsupportedStreamingError,
+  getPluginCapabilities,
 } from '../../dist/index.mjs';
 
 const dataKey = () => Buffer.alloc(32, 0x5a);
@@ -107,6 +108,12 @@ test('KMS plugin rejects stream mode before contacting its provider', () => {
     kms: provider({ async generateDataKey() { called = true; throw new Error('must not run'); } }),
   }));
   const destination = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+  assert.deepEqual(engine.pluginCapabilities[0], {
+    plugin: 'kms-encryption@1.0.0',
+    ...getPluginCapabilities(engine.plugins[0]),
+  });
+  assert.equal(engine.pluginCapabilities[0].reverse, true);
+  assert.equal(engine.pluginCapabilities[0].streamMode, 'none');
   assert.throws(() => engine.stream.into(destination), UnsupportedStreamingError);
   assert.equal(called, false);
 });

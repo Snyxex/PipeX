@@ -69,6 +69,8 @@ PipeX does not provide HTTP authentication, authorization, tenant isolation, sec
 interface ProcessorPlugin {
   readonly name: string;
   readonly version: string;
+  readonly reversible?: boolean;
+  readonly streaming?: boolean;
   retryOptions?: RetryOptions;
   process(data: Buffer, context: ProcessorContext): Promise<Buffer> | Buffer;
   reverse?(data: Buffer, context: ProcessorContext): Promise<Buffer> | Buffer;
@@ -76,4 +78,19 @@ interface ProcessorPlugin {
 }
 ```
 
-A reversible pipeline requires every state-changing plugin to implement `reverse()`. Missing reverse behavior fails closed in stream fallback mode.
+Capabilities are normalized and validated by `getPluginCapabilities(plugin)` and
+can be queried with `supportsOperation(plugin, 'process' | 'reverse' | 'stream')`.
+For registered pipelines, `engine.pluginCapabilities` returns an immutable view
+in execution order. `streamMode` distinguishes native plugin streams from the
+per-chunk fallback adapter and plugins that reject streaming entirely.
+
+`reversible: true` requires a real `reverse()` implementation. Omitting
+`reversible` derives support from the implementation; setting it to `false`
+allows configuration-dependent plugins to disable an otherwise present method.
+Likewise, `streaming: false` must not be combined with `createStream()`. Invalid
+declarations fail during `engine.use()` with `InvalidPluginCapabilityError`.
+
+A reversible pipeline requires every plugin to support `reverse()`. Unsupported
+operations fail before any reverse plugin is executed with
+`UnsupportedReverseError`; the default `BasePlugin.reverse()` also throws that
+typed error and never returns the input as a successful result.

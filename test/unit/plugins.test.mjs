@@ -8,9 +8,31 @@ import {
   EncryptionPlugin,
   HashingPlugin,
   ValidationPlugin,
+  getPluginCapabilities,
 } from '../../dist/index.mjs';
 
 const context = () => ({ requestId: 'test', timestamp: Date.now(), metadata: {} });
+
+test('standard plugin declarations match their reverse and stream implementations', () => {
+  const plugins = [
+    new CompressionPlugin({ type: 'gzip', level: 1 }),
+    new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: randomBytes(32) }),
+    new HashingPlugin({ algorithm: 'sha256', secret: '0123456789abcdef' }),
+    new ValidationPlugin({ schema: z.any() }),
+    new BenchmarkPlugin(),
+  ];
+
+  for (const plugin of plugins) {
+    const capabilities = getPluginCapabilities(plugin);
+    assert.equal(capabilities.reverse, true, plugin.name);
+    assert.equal(capabilities.streaming, true, plugin.name);
+    assert.equal(
+      capabilities.streamMode,
+      typeof plugin.createStream === 'function' ? 'native' : 'fallback',
+      plugin.name,
+    );
+  }
+});
 
 for (const type of ['gzip', 'brotli', 'none']) {
   test(`compression round-trip: ${type}`, { timeout: 10_000 }, async () => {

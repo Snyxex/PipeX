@@ -20,9 +20,16 @@ import {
   type RetryOptions,
   type EngineLimits,
   type StreamPluginContext,
+  type PluginCapabilities,
+  type PluginOperation,
   isManifest 
 } from './types.js';
-import { UnsupportedReverseError, UnsupportedStreamingError } from './errors.js';
+import {
+  InvalidPluginCapabilityError,
+  UnsupportedReverseError,
+  UnsupportedStreamingError,
+} from './errors.js';
+import { BasePlugin } from './plugin.js';
 
 export { isManifest };
 
@@ -106,8 +113,58 @@ export function hasStreamSupport(p: ProcessorPlugin): p is PluginWithStream {
   return typeof p['createStream'] === 'function';
 }
 
+/**
+ * Returns the effective capabilities of a plugin after validating declarations.
+ * Explicit `false` declarations are authoritative, which supports plugins whose
+ * implementation is present but disabled by configuration (for example workers).
+ */
+export function getPluginCapabilities(plugin: ProcessorPlugin): Readonly<PluginCapabilities> {
+  const pluginId = `${plugin.name}@${plugin.version}`;
+  const reversible = plugin.reversible;
+  const streaming = plugin.streaming;
+  const reverseImplementation = plugin.reverse;
+  const streamImplementation = plugin.createStream;
+  const hasReverseImplementation = typeof reverseImplementation === 'function'
+    && reverseImplementation !== BasePlugin.prototype.reverse;
+
+  if (reversible !== undefined && typeof reversible !== 'boolean') {
+    throw new InvalidPluginCapabilityError(pluginId, 'reversible', 'MUST_BE_BOOLEAN');
+  }
+  if (streaming !== undefined && typeof streaming !== 'boolean') {
+    throw new InvalidPluginCapabilityError(pluginId, 'streaming', 'MUST_BE_BOOLEAN');
+  }
+  if (reversible === true && !hasReverseImplementation) {
+    throw new InvalidPluginCapabilityError(pluginId, 'reversible', 'MISSING_IMPLEMENTATION');
+  }
+  if (streaming === false && typeof streamImplementation === 'function') {
+    throw new InvalidPluginCapabilityError(pluginId, 'streaming', 'CONFLICTING_IMPLEMENTATION');
+  }
+
+  const canReverse = reversible !== false && hasReverseImplementation;
+  const canStream = streaming !== false;
+  return Object.freeze({
+    process: true,
+    reverse: canReverse,
+    streaming: canStream,
+    streamMode: canStream
+      ? (typeof streamImplementation === 'function' ? 'native' : 'fallback')
+      : 'none',
+  });
+}
+
+/** Query an operation without attempting to execute it. Invalid declarations fail closed. */
+export function supportsOperation(plugin: ProcessorPlugin, operation: PluginOperation): boolean {
+  const capabilities = getPluginCapabilities(plugin);
+  switch (operation) {
+    case 'process': return capabilities.process;
+    case 'reverse': return capabilities.reverse;
+    case 'stream': return capabilities.streaming;
+    default: throw new TypeError('[PipeX] Unknown plugin operation');
+  }
+}
+
 export function supportsReverse(plugin: ProcessorPlugin): plugin is ProcessorPlugin & Required<Pick<ProcessorPlugin, 'reverse'>> {
-  return plugin.reversible !== false && typeof plugin.reverse === 'function';
+  return supportsOperation(plugin, 'reverse');
 }
 
 export function assertReversiblePipeline(plugins: readonly ProcessorPlugin[]): void {
@@ -116,7 +173,7 @@ export function assertReversiblePipeline(plugins: readonly ProcessorPlugin[]): v
 }
 
 export function assertStreamingPipeline(plugins: readonly ProcessorPlugin[]): void {
-  const unsupported = plugins.find(plugin => plugin.streaming === false);
+  const unsupported = plugins.find(plugin => !supportsOperation(plugin, 'stream'));
   if (unsupported) throw new UnsupportedStreamingError(`${unsupported.name}@${unsupported.version}`);
 }
 
@@ -330,8 +387,8 @@ export function buildFallbackTransform(
       try {
         streamContext?.signal.throwIfAborted();
         const ctx = makeContext(requestId, {}, logger, span, streamContext?.signal, streamContext?.limits);
-        if (reverse && typeof plugin.reverse !== 'function') {
-          throw new Error(`[PipeX] Plugin ${plugin.name} is not reversible`);
+        if (reverse && !supportsReverse(plugin)) {
+          throw new UnsupportedReverseError(`${plugin.name}@${plugin.version}`);
         }
         const fn = reverse ? plugin.reverse!.bind(plugin) : plugin.process.bind(plugin);
         

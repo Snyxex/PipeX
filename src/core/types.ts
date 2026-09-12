@@ -114,6 +114,21 @@ export interface ProcessorPlugin {
   retryOptions?: RetryOptions;
 }
 
+export type PluginOperation = 'process' | 'reverse' | 'stream';
+
+/** Normalized, runtime-validated operations exposed by a plugin. */
+export interface PluginCapabilities {
+  readonly process: true;
+  readonly reverse: boolean;
+  readonly streaming: boolean;
+  readonly streamMode: 'native' | 'fallback' | 'none';
+}
+
+/** Capability view for a plugin registered with a DataEngine. */
+export interface RegisteredPluginCapabilities extends PluginCapabilities {
+  readonly plugin: string;
+}
+
 export interface EngineResult {
   readonly data:         Buffer;
   readonly originalType: string;

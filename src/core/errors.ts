@@ -1,6 +1,7 @@
 export type PipeXErrorCode =
   | 'UNSUPPORTED_REVERSE'
   | 'UNSUPPORTED_STREAMING'
+  | 'INVALID_PLUGIN_CAPABILITY'
   | 'OPERATION_ABORTED'
   | 'OPERATION_TIMEOUT'
   | 'KMS_PROVIDER_FAILURE'
@@ -31,6 +32,31 @@ export class UnsupportedStreamingError extends PipeXError {
   public override readonly name: string = 'UnsupportedStreamingError';
   constructor(public readonly plugin: string) {
     super('UNSUPPORTED_STREAMING', `[PipeX] Plugin ${plugin} does not support stream operations`);
+  }
+}
+
+export type InvalidPluginCapabilityIssue =
+  | 'MUST_BE_BOOLEAN'
+  | 'MISSING_IMPLEMENTATION'
+  | 'CONFLICTING_IMPLEMENTATION';
+
+export class InvalidPluginCapabilityError extends PipeXError {
+  public override readonly name: string = 'InvalidPluginCapabilityError';
+
+  constructor(
+    public readonly plugin: string,
+    public readonly capability: 'reversible' | 'streaming',
+    public readonly issue: InvalidPluginCapabilityIssue,
+  ) {
+    const details = issue === 'MUST_BE_BOOLEAN'
+      ? 'must be a boolean when declared'
+      : issue === 'MISSING_IMPLEMENTATION'
+        ? 'is declared but its implementation is missing'
+        : 'is disabled but its implementation is present';
+    super(
+      'INVALID_PLUGIN_CAPABILITY',
+      `[PipeX] Plugin ${plugin} has an invalid ${capability} capability: ${details}`,
+    );
   }
 }
 

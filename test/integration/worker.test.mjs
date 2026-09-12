@@ -15,6 +15,8 @@ test('worker pool runs caller-owned forward and reverse exports', async () => {
   const plugin = new WorkerPoolPlugin({ filename, processName: 'encode', reverseName: 'decode', maxThreads: 1 });
   try {
     const engine = new DataEngine().use(plugin);
+    assert.equal(engine.pluginCapabilities[0].reverse, true);
+    assert.equal(engine.pluginCapabilities[0].streamMode, 'native');
     const result = await engine.binary.run(Buffer.from('worker payload'));
     assert.equal((await engine.binary.undo(result)).toString(), 'worker payload');
   } finally {
@@ -26,6 +28,8 @@ test('worker pool is forward-only unless a reverse export is configured', async 
   const plugin = new WorkerPoolPlugin({ filename, maxThreads: 1 });
   try {
     const engine = new DataEngine().use(plugin);
+    assert.equal(engine.pluginCapabilities[0].reverse, false);
+    assert.equal(engine.pluginCapabilities[0].streamMode, 'native');
     const result = await engine.binary.run(Buffer.from('forward'));
     await assert.rejects(engine.binary.undo(result), UnsupportedReverseError);
   } finally {

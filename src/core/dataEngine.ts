@@ -24,8 +24,9 @@ import type {
   EngineConfig
   , EngineLimits
   , OperationOptions
+  , RegisteredPluginCapabilities
 } from './types.js';
-import { DEFAULT_LIMITS }       from './core.js';
+import { DEFAULT_LIMITS, getPluginCapabilities } from './core.js';
 import { FileController }       from './controllers/FileController.js';
 import { BinaryController }     from './controllers/BinaryController.js';
 import { StreamController }     from './controllers/StreamController.js';
@@ -283,6 +284,7 @@ export class DataEngine extends EventEmitter {
       || typeof plugin.process !== 'function') {
       throw new Error('[PipeX] Invalid processor plugin');
     }
+    getPluginCapabilities(plugin);
     if (this.#activeRequests.size > 0) {
       throw new Error('[PipeX] Cannot modify the plugin pipeline while operations are active');
     }
@@ -303,6 +305,14 @@ export class DataEngine extends EventEmitter {
   /** Human-readable plugin identifiers in execution order. */
   get pipeline(): readonly string[] {
     return Object.freeze(this.#pluginView.map(plugin => `${plugin.name}@${plugin.version}`));
+  }
+
+  /** Runtime-validated capabilities in pipeline order. */
+  get pluginCapabilities(): readonly Readonly<RegisteredPluginCapabilities>[] {
+    return Object.freeze(this.#pluginView.map(plugin => Object.freeze({
+      plugin: `${plugin.name}@${plugin.version}`,
+      ...getPluginCapabilities(plugin),
+    })));
   }
 
   // ── Request lifecycle (called by controllers) ────────────────────────────────

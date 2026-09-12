@@ -14,7 +14,7 @@ export abstract class BasePlugin implements ProcessorPlugin {
 
   abstract process(data: Buffer, context: ProcessorContext): Promise<Buffer> | Buffer;
 
-  // Standardmäßig ein Pass-through, falls nicht überschrieben
+  /** Unsupported by default. Subclasses must implement reverse explicitly. */
   reverse(_data: Buffer, _context: ProcessorContext): Promise<Buffer> | Buffer {
     throw new UnsupportedReverseError(`${this.name}@${this.version}`);
   }

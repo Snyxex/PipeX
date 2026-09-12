@@ -22,12 +22,16 @@ export type {
   KmsRequestOptions,
   SchemaRegistry,
   EngineConfig,
+  PluginCapabilities,
+  PluginOperation,
+  RegisteredPluginCapabilities,
 }                            from './core/types.js';
 export { isManifest }        from './core/types.js';
 
 export { BasePlugin } from './core/plugin.js';
 export {
   KmsProviderError,
+  InvalidPluginCapabilityError,
   OperationAbortedError,
   OperationTimeoutError,
   PipeXError,
@@ -36,7 +40,7 @@ export {
   WorkerPoolClosedError,
   WorkerTaskError,
 } from './core/errors.js';
-export type { PipeXErrorCode } from './core/errors.js';
+export type { InvalidPluginCapabilityIssue, PipeXErrorCode } from './core/errors.js';
 
 // --- Standard Plugin Library ---
 import { HashingPlugin } from './plugin/hashing.js';
