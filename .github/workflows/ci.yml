@@ -50,6 +50,8 @@ jobs:
         run: npm run test:security
       - name: Check package exports and npm pack dry-run
         run: npm run test:package:built
+      - name: Test packed and Git dependency consumers
+        run: npm run test:consumer:built
       - name: Run performance and backpressure smoke tests
         run: npm run test:performance:built
 

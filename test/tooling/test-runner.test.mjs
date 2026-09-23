@@ -41,7 +41,7 @@ test('suite runner discovers tests and propagates failures and timeouts', { time
 
 test('every automated test belongs to an explicit suite', async () => {
   const testRoot = resolve('test');
-  const allowedSuites = new Set(['integration', 'package', 'performance', 'security', 'tooling', 'unit']);
+  const allowedSuites = new Set(['consumer', 'integration', 'package', 'performance', 'security', 'tooling', 'unit']);
   async function findTests(directory) {
     const entries = await readdir(directory, { withFileTypes: true });
     const nested = await Promise.all(entries.map(entry => {
@@ -58,7 +58,7 @@ test('every automated test belongs to an explicit suite', async () => {
   }
 
   const manifest = JSON.parse(await readFile(resolve('package.json'), 'utf8'));
-  for (const suite of ['tooling', 'unit', 'integration', 'security', 'package']) {
+  for (const suite of ['tooling', 'unit', 'integration', 'security', 'package', 'consumer']) {
     assert.match(manifest.scripts.test, new RegExp(`npm run test:${suite}`));
   }
   assert.doesNotMatch(manifest.scripts.test, /performance|benchmark/);
