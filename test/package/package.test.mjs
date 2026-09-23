@@ -14,8 +14,15 @@ test('package metadata, lockfile root, and built export targets agree', async ()
   assert.deepEqual(lockedRoot.devDependencies, manifest.devDependencies);
   assert.deepEqual(lockedRoot.engines, manifest.engines);
   assert.equal(manifest.main, manifest.exports['.'].import);
+  assert.equal(manifest.types, manifest.exports['.'].types);
+  assert.equal(manifest.scripts.prepare, 'npm run build');
+  assert.ok(manifest.devDependencies.tsdown, 'Git installs need the build tool as a dev dependency');
+  assert.ok(manifest.devDependencies.typescript, 'Git installs need TypeScript for declarations');
 
-  for (const conditions of Object.values(manifest.exports)) {
+  for (const [subpath, conditions] of Object.entries(manifest.exports)) {
+    assert.deepEqual(Object.keys(conditions).sort(), ['import', 'types']);
+    assert.match(conditions.import, /^\.\/dist\/.+\.mjs$/, `${subpath} must expose an ESM runtime file`);
+    assert.match(conditions.types, /^\.\/dist\/.+\.d\.mts$/, `${subpath} must expose ESM declarations`);
     await access(new URL(`../../${conditions.import.slice(2)}`, import.meta.url));
     await access(new URL(`../../${conditions.types.slice(2)}`, import.meta.url));
   }
