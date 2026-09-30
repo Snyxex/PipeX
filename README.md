@@ -174,18 +174,21 @@ npm pack --dry-run
 unit tests, integration tests, behavioral security regressions, and package
 sanity checks. `test:performance` is a short CI-safe smoke suite.
 
-`npm run quality:ci` is the local equivalent of the CI quality job. It builds
+`npm run quality:ci` is the local equivalent of the Jenkins quality job. It builds
 once, runs every automated suite (including the short performance/backpressure
-smoke tests), and validates the exact `npm pack --dry-run` payload. CI runs this
+smoke tests), and validates the exact `npm pack --dry-run` payload. Jenkins runs this
 sequence on Node.js 20.19.0 plus the latest Node.js 22 and 24 releases. Node
 20.19.0 is the declared minimum; current releases are used for the other active
 major lines so security and compatibility fixes are exercised continuously.
-CI installs with lifecycle scripts disabled, then invokes the trusted project
-build explicitly.
+Jenkins installs with lifecycle scripts disabled, then invokes the trusted project
+build and checks explicitly for better per-suite diagnostics. GitHub Actions remains
+enabled until the first Jenkins Multibranch build is green, so the migration does not
+create a CI gap.
 
 The separate dependency-audit job checks runtime and development dependencies
 with `npm audit --audit-level=high`. High and critical advisories are blocking;
 moderate and low advisories remain visible in the report without failing CI.
+See [Jenkins CI](./docs/jenkins.md) for job and agent requirements.
 
 Large throughput work is intentionally excluded from `npm test` and CI. Run it
 manually with `npm run benchmark:large`; set `PIPEX_BENCHMARK_BYTES` to override

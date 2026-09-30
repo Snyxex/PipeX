@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -63,22 +63,39 @@ test('every automated test belongs to an explicit suite', async () => {
   }
   assert.doesNotMatch(manifest.scripts.test, /performance|benchmark/);
 
+  const jenkinsfile = await readFile(resolve('Jenkinsfile'), 'utf8');
+  const compose = await readFile(resolve('.ci/jenkins-compose.yml'), 'utf8');
+  const jobRunner = await readFile(resolve('.ci/run-jenkins-job.sh'), 'utf8');
   const workflow = await readFile(resolve('.github/workflows/ci.yml'), 'utf8');
-  assert.match(workflow, /npm run test:performance/);
-  assert.doesNotMatch(workflow, /benchmark:large/);
+  const jenkinsDocs = await readFile(resolve('docs/jenkins.md'), 'utf8');
+  assert.match(jenkinsfile, /agent \{ label 'docker-vps' \}/);
+  assert.match(jenkinsfile, /disableConcurrentBuilds\(abortPrevious: true\)/);
+  assert.match(jenkinsfile, /skipDefaultCheckout\(true\)/);
+  assert.match(jenkinsfile, /checkout scm/);
+  assert.match(jenkinsfile, /run-jenkins-job\.sh node20-ci quality/);
+  assert.match(jenkinsfile, /run-jenkins-job\.sh node22-ci quality/);
+  assert.match(jenkinsfile, /run-jenkins-job\.sh node24-ci quality/);
+  assert.match(jenkinsfile, /run-jenkins-job\.sh audit-ci audit/);
+  assert.match(jenkinsfile, /run-jenkins-job\.sh github-consumer-ci github-consumer/);
+  assert.match(jenkinsfile, /archiveArtifacts artifacts: '.artifacts\/\*\.tgz,dist\/\*\*'/);
+  assert.match(jenkinsfile, /down --volumes --remove-orphans/);
+  assert.match(compose, /image: node:20\.19\.0-bookworm/);
+  assert.match(compose, /image: node:22-bookworm/);
+  assert.match(compose, /image: node:24-bookworm/);
+  assert.match(compose, /github-consumer-ci/);
+  assert.match(jobRunner, /npm ci --ignore-scripts --no-audit --no-fund/);
+  assert.match(jobRunner, /npm run typecheck/);
+  assert.match(jobRunner, /npm run test:performance:built/);
+  assert.match(jobRunner, /npm audit --audit-level=high/);
+  assert.match(jobRunner, /test -f dist\/index\.mjs/);
+  assert.match(jobRunner, /test -f dist\/index\.d\.mts/);
+  assert.match(jobRunner, /PIPEX_GITHUB_INSTALL_SPEC/);
+  assert.doesNotMatch(jobRunner, /benchmark:large/);
+  await access(resolve('.github/workflows/ci.yml'));
   assert.match(workflow, /node: \[20\.19\.0, 22\.x, 24\.x\]/);
-  assert.match(workflow, /permissions:\s+contents: read/);
-  assert.match(workflow, /npm ci --ignore-scripts --no-audit --no-fund/);
   assert.match(workflow, /npm audit --audit-level=high/);
-  assert.doesNotMatch(workflow, /pull_request_target|continue-on-error|secrets\./);
+  assert.match(jenkinsDocs, /GitHub Actions replacement matrix/);
+  assert.match(jenkinsDocs, /remains enabled until\s+the first Jenkins build/);
   assert.doesNotMatch(manifest.scripts['quality:ci'], /benchmark/);
-  for (const command of manifest.scripts['quality:ci'].split(' && ')) {
-    assert.ok(workflow.includes(`run: ${command}`), `${command} is missing from CI`);
-  }
-
-  const uses = [...workflow.matchAll(/^\s*uses:\s*(\S+)/gm)].map(match => match[1]);
-  assert.ok(uses.length > 0, 'CI must use at least one action');
-  for (const action of uses) {
-    assert.match(action, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, `${action} is not pinned to a commit SHA`);
-  }
+  assert.match(manifest.scripts['quality:ci'], /npm run test:performance:built/);
 });

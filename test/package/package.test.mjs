@@ -63,6 +63,7 @@ test('dry-run tarball contains only the public release payload', () => {
     'docs/architecture.md',
     'docs/encryption-v4-migration.md',
     'docs/enterprise.md',
+    'docs/jenkins.md',
     'package.json',
   ]);
 });

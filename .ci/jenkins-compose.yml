@@ -1,0 +1,52 @@
+services:
+  node20-ci:
+    image: node:20.19.0-bookworm
+    working_dir: /workspace
+    environment:
+      CI: "true"
+      npm_config_cache: /tmp/npm-cache
+    volumes:
+      - node20-workspace:/workspace
+
+  node22-ci:
+    image: node:22-bookworm
+    working_dir: /workspace
+    environment:
+      CI: "true"
+      npm_config_cache: /tmp/npm-cache
+    volumes:
+      - node22-workspace:/workspace
+
+  node24-ci:
+    image: node:24-bookworm
+    working_dir: /workspace
+    environment:
+      CI: "true"
+      npm_config_cache: /tmp/npm-cache
+    volumes:
+      - node24-workspace:/workspace
+
+  audit-ci:
+    image: node:24-bookworm
+    working_dir: /workspace
+    environment:
+      CI: "true"
+      npm_config_cache: /tmp/npm-cache
+    volumes:
+      - audit-workspace:/workspace
+
+  github-consumer-ci:
+    image: node:24-bookworm
+    working_dir: /workspace
+    environment:
+      CI: "true"
+      npm_config_cache: /tmp/npm-cache
+    volumes:
+      - github-consumer-workspace:/workspace
+
+volumes:
+  node20-workspace:
+  node22-workspace:
+  node24-workspace:
+  audit-workspace:
+  github-consumer-workspace:

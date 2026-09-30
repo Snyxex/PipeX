@@ -16,6 +16,7 @@
     "test:package:built": "node scripts/run-test-suite.mjs --timeout=30000 test/package",
     "test:consumer": "npm run build && npm run test:consumer:built",
     "test:consumer:built": "node scripts/run-test-suite.mjs --timeout=120000 test/consumer",
+    "test:consumer:github": "node scripts/verify-github-consumer.mjs",
     "test:hardening": "npm run test:security",
     "test:performance": "npm run build && npm run test:performance:built",
     "test:performance:built": "node scripts/run-test-suite.mjs --timeout=15000 test/performance",
