@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality / Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20.19.0, 22.x, 24.x]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Use the declared npm version
+        run: npm install --global npm@11.16.0 --ignore-scripts --no-audit --no-fund
+      - name: Install from lockfile
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Test tooling
+        run: npm run test:tooling
+      - name: Test unit paths
+        run: npm run test:unit
+      - name: Test integration paths
+        run: npm run test:integration
+      - name: Test hardening and security paths
+        run: npm run test:security
+      - name: Check package exports and npm pack dry-run
+        run: npm run test:package:built
+      - name: Test packed and Git dependency consumers
+        run: npm run test:consumer:built
+      - name: Run performance and backpressure smoke tests
+        run: npm run test:performance:built
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Use the declared npm version
+        run: npm install --global npm@11.16.0 --ignore-scripts --no-audit --no-fund
+      - name: Install from lockfile
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Audit runtime and build dependencies
+        run: npm audit --audit-level=high

@@ -80,7 +80,7 @@ release or npm publishing behavior is implemented now.
 | `npm ci --ignore-scripts --no-audit --no-fund` | Every quality, audit, and GitHub-consumer container |
 | Typecheck, build, tooling, unit, integration, security, package, consumer, performance | Explicit commands in every quality matrix entry |
 | `npm audit --audit-level=high` | Blocking `Dependency audit` branch on Node 24 |
-| GitHub Actions concurrency and timeouts | Declarative Jenkins options, `failFast`, and stage timeouts |
+| GitHub Actions concurrency and timeouts | Declarative Jenkins options and stage timeouts |
 
 The Jenkins pipeline adds an explicit Dist gate, artifact archive, and a remote
 GitHub-install consumer smoke test. Once a green Jenkins Multibranch build has

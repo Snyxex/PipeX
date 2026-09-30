@@ -39,8 +39,6 @@ pipeline {
 
     stage('CI gates') {
       parallel {
-        failFast true
-
         stage('Quality / Node 20.19') {
           steps {
             sh 'bash .ci/run-jenkins-job.sh node20-ci quality'
