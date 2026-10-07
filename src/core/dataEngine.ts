@@ -183,7 +183,11 @@ export class DataEngine extends EventEmitter {
     }
     const signals = options.signal ? [options.signal] : [];
     if (timeoutMs > 0) signals.push(AbortSignal.timeout(timeoutMs));
-    const signal = signals.length === 0 ? new AbortController().signal : AbortSignal.any(signals);
+    // A fresh timeout already provides the required signal; composing it alone
+    // retains an unnecessary signal graph on busy request paths.
+    const signal = signals.length === 0 ? new AbortController().signal
+      : signals.length === 1 && !options.signal ? signals[0]!
+      : AbortSignal.any(signals);
     registerDeadline(signal, timeoutMs);
     return signal;
   }

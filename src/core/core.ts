@@ -66,7 +66,9 @@ export async function withRetry<T>(
   for (let i = 0; i < attempts; i++) {
     throwIfAborted(control?.signal);
     try {
-      return await awaitOperation(fn(), control?.signal, control?.track);
+      const result = await awaitOperation(fn(), control?.signal, control?.track);
+      throwIfAborted(control?.signal);
+      return result;
     } catch (err: unknown) {
       throwIfAborted(control?.signal);
       lastError = err instanceof Error ? err : new Error(String(err));
@@ -444,10 +446,10 @@ export function buildFallbackTransform(
         if (reverse && !supportsReverse(plugin)) {
           throw new UnsupportedReverseError(`${plugin.name}@${plugin.version}`);
         }
-        const fn = reverse ? plugin.reverse!.bind(plugin) : plugin.process.bind(plugin);
+        const fn = reverse ? plugin.reverse! : plugin.process;
         
         const out = await withRetry(
-          () => fn(chunk, ctx),
+          () => fn.call(plugin, chunk, ctx),
           plugin.retryOptions,
           logger,
           { signal: streamContext?.signal, limits: streamContext?.limits, track: streamContext?.track },
@@ -538,14 +540,14 @@ export function buildTransformChain(
   if (reverse) assertReversiblePipeline(plugins);
   const ordered = reverse ? [...plugins].reverse() : plugins;
   return ordered.flatMap((plugin, index) => {
-    const transform = hasStreamSupport(plugin)
+    const native = hasStreamSupport(plugin);
+    const transform = native
       ? plugin.createStream(mode, streamContext)
       : buildFallbackTransform(plugin, reverse, onProgress, logger, tracer, dlq, streamContext);
-    const limit = buildByteLimitTransform(
-      streamContext?.limits.maxOutputBytes ?? DEFAULT_LIMITS.maxOutputBytes,
-      `output after plugin ${plugin.name}#${index}`,
-    );
-    if (!hasStreamSupport(plugin)) return [transform, limit];
+    const maxBytes = streamContext?.limits.maxOutputBytes ?? DEFAULT_LIMITS.maxOutputBytes;
+    const label = `output after plugin ${plugin.name}#${index}`;
+    if (!native) return [transform, buildByteLimitTransform(maxBytes, label)];
+    let total = 0;
 
     const span = tracer?.startSpan(`plugin:${plugin.name}`, { requestId: streamContext?.requestId ?? 'stream' } as ProcessorContext);
     let spanEnded = false;
@@ -559,6 +561,11 @@ export function buildTransformChain(
       transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
         onProgress?.(chunk.length);
         span?.addEvent('processed', { bytes: chunk.length });
+        if (chunk.length > maxBytes - total) {
+          cb(new Error(`[PipeX] ${label} exceeds ${maxBytes} bytes`));
+          return;
+        }
+        total += chunk.length;
         cb(null, chunk);
       },
       final(cb) {
@@ -570,7 +577,7 @@ export function buildTransformChain(
         cb(error);
       },
     });
-    return [transform, observe, limit];
+    return [transform, observe];
   });
 }
 
