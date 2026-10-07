@@ -132,24 +132,33 @@ Register a custom plugin with `DataEngine.registerPlugin('redact', RedactPlugin)
 
 ## Custom plugins
 
+Write a plugin without a class and attach it with `use()`:
+
 ```ts
-import { BasePlugin, type ProcessorContext } from 'pipex';
+import { DataEngine, definePlugin } from 'pipex';
 
-class PrefixPlugin extends BasePlugin {
-  readonly name = 'prefix';
-  readonly version = '1.0.0';
-
-  process(data: Buffer, _context: ProcessorContext): Buffer {
-    return Buffer.concat([Buffer.from('PX:'), data]);
-  }
-
-  reverse(data: Buffer, _context: ProcessorContext): Buffer {
-    return data.subarray(3);
-  }
-}
+const identity = definePlugin({
+  name: 'identity', version: '1.0.0',
+  process: data => data,
+  reverse: data => data,
+  streaming: true, // Identity is independent of chunk boundaries.
+});
+const engine = new DataEngine().use(identity);
 ```
 
-Plugins without `createStream()` use a chunk-based fallback. They must be safe to run independently for every stream chunk. Plugins that need whole-message semantics should implement a framed native stream or use the binary API.
+For configurable plugins, export a factory and supply it locally:
+
+```ts
+const configured = await DataEngine.fromConfig({
+  plugins: [{ name: 'prefix', options: { prefix: 'PX:' } }],
+}, { prefix: createPrefixPlugin });
+```
+
+The complete `createPrefixPlugin` implementation and guidance for streams, typed
+classes, retries and separate packages are in [Writing plugins](./docs/plugins.md).
+Object-style plugins default to binary-only. Explicitly enable chunk-safe fallback
+or implement `createStream()`. Existing classes and `registerPlugin()` remain
+supported; `registerPluginFactory()` adds global factory registration.
 
 ## Operational hooks
 

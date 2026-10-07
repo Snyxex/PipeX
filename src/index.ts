@@ -32,6 +32,8 @@ export type {
 export { isManifest }        from './core/types.js';
 
 export { BasePlugin } from './core/plugin.js';
+export { definePlugin } from './core/definePlugin.js';
+export type { PluginDefinition, PluginFactory, PluginRegistry } from './core/definePlugin.js';
 export {
   KmsProviderError,
   KmsAuthenticationError,

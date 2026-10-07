@@ -21,3 +21,11 @@ try {
   assert.equal(await readFile(output, 'utf8'), 'native file consumer');
 } finally { await rm(fileRoot, { recursive: true, force: true }); }
 console.log('pipex consumer runtime ok');
+
+const { definePlugin } = await import('pipex');
+const custom = new DataEngine().use(definePlugin({
+  name: 'consumer-prefix', version: '1.0.0',
+  process: data => Buffer.concat([Buffer.from('PX:'), data]),
+  reverse: data => data.subarray(3),
+}));
+assert.deepEqual(await custom.binary.undo(await custom.binary.run({ custom: true })), { custom: true });
