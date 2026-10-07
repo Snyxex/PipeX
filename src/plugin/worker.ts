@@ -77,7 +77,7 @@ function abortError(signal: AbortSignal): OperationAbortedError | OperationTimeo
 /** Runs caller-owned CPU transforms in a bounded, persistent Piscina pool. */
 export class WorkerPoolPlugin extends BasePlugin {
   public readonly name = 'worker-pool';
-  public readonly version = '4.1.0';
+  public readonly version = '5.0.0';
   readonly #pool: Piscina<ArrayBuffer, ArrayBuffer | Uint8Array>;
   readonly #processName?: string;
   readonly #reverseName?: string;
@@ -209,27 +209,108 @@ export class WorkerPoolPlugin extends BasePlugin {
   }
 
   public createStream(mode: 'compress' | 'decompress', context?: StreamPluginContext): Transform {
+    if (mode === 'decompress' && !this.#reverseName) throw new UnsupportedReverseError(this.name);
     const streamController = new AbortController();
     const signal = context?.signal
-      ? AbortSignal.any([context.signal, streamController.signal])
-      : streamController.signal;
+      ? AbortSignal.any([context.signal, streamController.signal]) : streamController.signal;
+    const limits = context?.limits ?? DEFAULT_LIMITS;
+    const maxFrame = Math.min(limits.maxFrameBytes, 0xffff_fffe);
+    const magic = Buffer.from([0x50, 0x58, 0x57, 0x4b, 1]); // PXWK v1
+    const end = Buffer.from([0xff, 0xff, 0xff, 0xff]);
+    let inputBytes = 0;
+    let outputBytes = 0;
+    let frames = 0;
+    let started = false;
+    let ended = false;
+    let header = Buffer.alloc(magic.length);
+    let headerBytes = 0;
+    let payload: Buffer | undefined;
+    let payloadBytes = 0;
+    const plugin = this;
+    const emit = (stream: Transform, bytes: Buffer) => {
+      if (bytes.length > limits.maxOutputBytes - outputBytes) throw new Error('[PipeX] Worker stream output exceeds configured limit');
+      outputBytes += bytes.length;
+      stream.push(bytes);
+    };
+    const run = async (data: Buffer): Promise<Buffer> => {
+      if (++frames > limits.maxFrames) throw new Error('[PipeX] Worker frame count exceeds configured limit');
+      const ctx: ProcessorContext = {
+        requestId: context?.requestId ?? 'worker-stream', timestamp: Date.now(), signal,
+        limits, logger: context?.logger, metadata: {},
+      };
+      const task = mode === 'decompress' ? plugin.reverse(data, ctx) : plugin.process(data, ctx);
+      context?.track?.(task);
+      const output = await task;
+      signal.throwIfAborted();
+      if (output.length > maxFrame) throw new Error('[PipeX] Worker frame exceeds configured limit');
+      return output;
+    };
     return new Transform({
-      transform: (chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) => {
-        const ctx: ProcessorContext = {
-          requestId: context?.requestId ?? 'worker-stream',
-          timestamp: Date.now(),
-          signal,
-          limits: context?.limits,
-          logger: context?.logger,
-          metadata: {},
-        };
-        const task = mode === 'decompress' ? this.reverse(chunk, ctx) : this.process(chunk, ctx);
-        void task.then(output => callback(null, output), error => callback(error as Error));
+      transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
+        const stream = this;
+        void (async () => {
+          signal.throwIfAborted();
+          if (chunk.length > pluginInputLimit(context) - inputBytes) throw new Error('[PipeX] Worker stream input exceeds configured limit');
+          inputBytes += chunk.length;
+          if (mode === 'compress') {
+            if (!started) { emit(stream, magic); started = true; }
+            for (let offset = 0; offset < chunk.length; offset += maxFrame) {
+              const output = await run(chunk.subarray(offset, offset + maxFrame));
+              const length = Buffer.alloc(4);
+              length.writeUInt32BE(output.length);
+              emit(stream, length);
+              emit(stream, output);
+            }
+            return;
+          }
+          let offset = 0;
+          while (offset < chunk.length) {
+            if (ended) throw new Error('[PipeX] Worker stream has trailing bytes');
+            if (!payload) {
+              const count = Math.min(header.length - headerBytes, chunk.length - offset);
+              chunk.copy(header, headerBytes, offset, offset + count);
+              headerBytes += count;
+              offset += count;
+              if (headerBytes !== header.length) continue;
+              if (!started) {
+                if (!header.equals(magic)) throw new Error('[PipeX] Invalid worker stream format');
+                started = true;
+                header = Buffer.alloc(4);
+                headerBytes = 0;
+                continue;
+              }
+              const length = header.readUInt32BE();
+              headerBytes = 0;
+              if (length === 0xffff_ffff) { ended = true; continue; }
+              if (length > maxFrame) throw new Error('[PipeX] Worker frame exceeds configured limit');
+              payload = Buffer.alloc(length);
+              payloadBytes = 0;
+            }
+            const count = Math.min(payload.length - payloadBytes, chunk.length - offset);
+            chunk.copy(payload, payloadBytes, offset, offset + count);
+            payloadBytes += count;
+            offset += count;
+            if (payloadBytes === payload.length) {
+              emit(stream, await run(payload));
+              payload = undefined;
+              payloadBytes = 0;
+            }
+          }
+        })().then(() => callback(), error => callback(error as Error));
+      },
+      flush(callback) {
+        try {
+          signal.throwIfAborted();
+          if (mode === 'compress') {
+            if (!started) emit(this, magic);
+            emit(this, end);
+          } else if (!ended || payload || headerBytes) throw new Error('[PipeX] Incomplete worker stream');
+          callback();
+        } catch (error) { callback(error as Error); }
       },
       destroy(error, callback) {
-        if (!streamController.signal.aborted) {
-          streamController.abort(error ?? new DOMException('Worker stream destroyed', 'AbortError'));
-        }
+        if (!signal.aborted) streamController.abort(error ?? new DOMException('Worker stream destroyed', 'AbortError'));
+        payload = undefined;
         callback(error);
       },
     });

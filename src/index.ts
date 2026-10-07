@@ -11,6 +11,7 @@ export type {
   EngineEvents,
   EngineLimits,
   OperationOptions,
+  BinaryUndoOptions,
   StreamPluginContext,
   RetryOptions,
   Logger,

@@ -41,9 +41,17 @@ class MessagePackFrameScanner {
           offset++;
           this.#payloadBytes--;
           this.#extensionTypePending = false;
-          // msgpackr record and bundled-string extensions change how following
-          // bytes are parsed, so they are excluded from the bounded wire format.
-          if (extensionType === 0x62 || extensionType === 0x72) this.#invalidInput();
+          // These msgpackr extensions consume one subsequent value. Include it
+          // in this frame, including when the extension or child is fragmented.
+          if (extensionType === 0x65 || extensionType === 0x73 || extensionType === 0x78) {
+            this.#addChildren(1);
+            this.#ensureMinimumRemaining(this.#payloadBytes);
+          } else if (extensionType !== 0x00 && extensionType !== 0x42
+            && extensionType !== 0x74 && extensionType !== 0xff) {
+            // Records, bundles, references and unknown/custom extensions are
+            // outside the profile implemented by our scanner and encoders.
+            this.#invalidInput();
+          }
           if (this.#payloadBytes === 0) this.#completeIfReady(offset, boundaries);
           continue;
         }

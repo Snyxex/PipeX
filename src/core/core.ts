@@ -31,6 +31,9 @@ import {
 } from './errors.js';
 import { BasePlugin } from './plugin.js';
 import { DEFAULT_LIMITS } from './resourceLimits.js';
+import { assertMessagePackFrameLimits } from './frameLimits.js';
+import { awaitOperation, throwIfAborted } from './operations.js';
+import { safeLogger, safeTracer } from './observability.js';
 
 export { assertMessagePackFrameLimits, buildFrameLimitTransform } from './frameLimits.js';
 export { DEFAULT_LIMITS } from './resourceLimits.js';
@@ -46,8 +49,9 @@ export async function withRetry<T>(
   fn: () => Promise<T> | T,
   options?: RetryOptions,
   logger?: Logger,
-  control?: { signal?: AbortSignal; limits?: Pick<EngineLimits, 'maxRetryAttempts' | 'maxRetryDelayMs'> },
+  control?: { signal?: AbortSignal; limits?: Pick<EngineLimits, 'maxRetryAttempts' | 'maxRetryDelayMs'>; track?: (pending: Promise<unknown>) => void },
 ): Promise<T> {
+  logger = safeLogger(logger);
   const { attempts = 1, backoff = 'fixed', delayMs = 0 } = options ?? {};
   const maxAttempts = control?.limits?.maxRetryAttempts ?? 5;
   const maxDelay = control?.limits?.maxRetryDelayMs ?? 30_000;
@@ -60,10 +64,11 @@ export async function withRetry<T>(
   let lastError: Error | undefined;
 
   for (let i = 0; i < attempts; i++) {
-    control?.signal?.throwIfAborted();
+    throwIfAborted(control?.signal);
     try {
-      return await fn();
+      return await awaitOperation(fn(), control?.signal, control?.track);
     } catch (err: unknown) {
+      throwIfAborted(control?.signal);
       lastError = err instanceof Error ? err : new Error(String(err));
       if (i < attempts - 1) {
         const nextDelay = backoff === 'exponential' ? delayMs * Math.pow(2, i) : delayMs;
@@ -78,6 +83,7 @@ export async function withRetry<T>(
               reject(control?.signal?.reason ?? new Error('[PipeX] Operation aborted'));
             };
             control?.signal?.addEventListener('abort', onAbort, { once: true });
+            if (control?.signal?.aborted) onAbort();
           });
         }
       }
@@ -91,8 +97,8 @@ export async function withRetry<T>(
 export const PIPEX_MANIFEST_KEY = '__pipex_v' as const;
 
 // ─── Singletons ───────────────────────────────────────────────────────────────
-export const PACKR   = new Packr({ useRecords: false });
-export const UNPACKR = new Unpackr({ useRecords: false });
+export const PACKR   = new Packr({ useRecords: false, moreTypes: true, structuredClone: false, bundleStrings: false });
+export const UNPACKR = new Unpackr({ useRecords: false, structuredClone: false });
 
 /** @deprecated Use `DEFAULT_LIMITS.maxFrameBytes` or an engine-specific limit. */
 export const MAX_FRAME_BYTES    = 256 * 1024 * 1024;
@@ -189,40 +195,61 @@ export function toBuffer(input: unknown): Buffer {
   return Buffer.from(String(input ?? ''), 'utf-8');
 }
 
-export function fromBuffer(buffer: Buffer, targetType: string): unknown {
-  // Robustness: if buffer is already decoded (from unpackWithManifest), just return it
-  if (typeof buffer !== 'object' || !Buffer.isBuffer(buffer)) {
-    if (targetType === 'object' || targetType === 'array' || targetType === 'null') {
-      return buffer;
-    }
-  }
+export const ORIGINAL_TYPES = Object.freeze([
+  'buffer', 'object', 'array', 'string', 'number', 'boolean', 'null', 'undefined', 'bigint', 'json',
+] as const);
 
-  switch (targetType) {
-    case 'array':
-    case 'object': {
-      try { return UNPACKR.unpack(buffer); }
-      catch (e: unknown) {
-        throw new Error(`[PipeX] fromBuffer: invalid MsgPack — ${(e as Error).message}`);
-      }
-    }
-    case 'json': { // Legacy support or explicit JSON
-      try { return JSON.parse(buffer.toString('utf-8')); }
-      catch (e: unknown) {
-        throw new Error(`[PipeX] fromBuffer: invalid JSON — ${(e as Error).message}`);
-      }
-    }
-    case 'number': {
-      const n = Number(buffer.toString('utf-8'));
-      if (isNaN(n)) throw new Error('[PipeX] fromBuffer: cannot convert to number');
-      return n;
-    }
-    case 'boolean': return buffer.toString('utf-8') === 'true';
-    case 'string':  return buffer.toString('utf-8');
-    case 'null':    return null;
-    default:        return buffer;
+export function assertOriginalType(value: unknown): asserts value is string {
+  if (typeof value !== 'string' || !(ORIGINAL_TYPES as readonly string[]).includes(value)) {
+    throw new Error('[PipeX] Unsupported original type');
   }
 }
 
+export function fromBuffer(
+  buffer: Buffer,
+  targetType: string,
+  maxFrameBytes = DEFAULT_LIMITS.maxFrameBytes,
+): unknown {
+  assertOriginalType(targetType);
+  if (!Buffer.isBuffer(buffer)) throw new Error('[PipeX] Invalid binary payload');
+  switch (targetType) {
+    case 'array':
+    case 'object': {
+      assertMessagePackFrameLimits(buffer, maxFrameBytes, 1);
+      let decoded: unknown;
+      try { decoded = UNPACKR.unpack(buffer); }
+      catch { throw new Error('[PipeX] fromBuffer: invalid MessagePack input'); }
+      if (targetType === 'array' ? !Array.isArray(decoded) : decoded === null || typeof decoded !== 'object' || Array.isArray(decoded)) {
+        throw new Error('[PipeX] Decoded value does not match the expected type');
+      }
+      return decoded;
+    }
+    case 'json': {
+      try { return JSON.parse(buffer.toString('utf-8')); }
+      catch { throw new Error('[PipeX] fromBuffer: invalid JSON input'); }
+    }
+    case 'number': {
+      const n = Number(buffer.toString('utf-8'));
+      if (Number.isNaN(n)) throw new Error('[PipeX] fromBuffer: invalid number');
+      return n;
+    }
+    case 'bigint': {
+      try { return BigInt(buffer.toString('utf-8')); }
+      catch { throw new Error('[PipeX] fromBuffer: invalid bigint'); }
+    }
+    case 'boolean': {
+      const value = buffer.toString('utf-8');
+      if (value !== 'true' && value !== 'false') throw new Error('[PipeX] fromBuffer: invalid boolean');
+      return value === 'true';
+    }
+    case 'string': return buffer.toString('utf-8');
+    case 'null':
+    case 'undefined':
+      if (buffer.length !== 0) throw new Error('[PipeX] Payload does not match the expected empty type');
+      return targetType === 'null' ? null : undefined;
+    default: return buffer;
+  }
+}
 // ─── Context factory ──────────────────────────────────────────────────────────
 
 export function makeContext(
@@ -321,12 +348,12 @@ export class GuardedUnpackrStream extends UnpackrStream {
 
 /** PackrStream with useRecords disabled (safe default). */
 export function createPackrStream(): PackrStream {
-  return new PackrStream({ useRecords: false });
+  return new PackrStream({ useRecords: false, moreTypes: true, structuredClone: false, bundleStrings: false });
 }
 
 /** GuardedUnpackrStream with useRecords disabled. */
 export function createUnpackrStream(maxInputBytes = DEFAULT_LIMITS.maxInputBytes): GuardedUnpackrStream {
-  return new GuardedUnpackrStream({ useRecords: false }, maxInputBytes);
+  return new GuardedUnpackrStream({ useRecords: false, structuredClone: false }, maxInputBytes);
 }
 
 export function buildByteLimitTransform(maxBytes: number, label: string): Transform {
@@ -402,6 +429,8 @@ export function buildFallbackTransform(
   dlq?:    Writable,
   streamContext?: StreamPluginContext,
 ): Transform {
+  logger = safeLogger(logger);
+  tracer = safeTracer(tracer);
   const requestId = streamContext?.requestId ?? `stream-${randomUUID()}`;
   return new Transform({
     async transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
@@ -421,7 +450,7 @@ export function buildFallbackTransform(
           () => fn(chunk, ctx),
           plugin.retryOptions,
           logger,
-          { signal: streamContext?.signal, limits: streamContext?.limits },
+          { signal: streamContext?.signal, limits: streamContext?.limits, track: streamContext?.track },
         );
         const maxOutputBytes = streamContext?.limits.maxOutputBytes ?? DEFAULT_LIMITS.maxOutputBytes;
         if (!Buffer.isBuffer(out) || out.length > maxOutputBytes) {
@@ -503,6 +532,8 @@ export function buildTransformChain(
   dlq?:    Writable,
   streamContext?: StreamPluginContext,
 ): (Duplex | Transform | PackrStream | GuardedUnpackrStream)[] {
+  logger = safeLogger(logger);
+  tracer = safeTracer(tracer);
   assertStreamingPipeline(plugins);
   if (reverse) assertReversiblePipeline(plugins);
   const ordered = reverse ? [...plugins].reverse() : plugins;

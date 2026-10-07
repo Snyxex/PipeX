@@ -31,6 +31,9 @@ import { FileController }       from './controllers/FileController.js';
 import { BinaryController }     from './controllers/BinaryController.js';
 import { StreamController }     from './controllers/StreamController.js';
 
+import { safeLogger, safeTracer, observe } from './observability.js';
+import { registerDeadline } from './operations.js';
+
 const MAX_TIMER_MS = 0x7fff_ffff;
 
 // ─── Typed EventEmitter ───────────────────────────────────────────────────────
@@ -102,6 +105,9 @@ export class DataEngine extends EventEmitter {
   #auditLogger?: AuditLogger;
   #limits: Readonly<EngineLimits>;
   readonly #activeRequests = new Set<string>();
+  readonly #pendingWork = new Map<string, Set<Promise<unknown>>>();
+  readonly #finishedRequests = new Set<string>();
+  readonly #requestPipelines = new Map<string, readonly string[]>();
 
   // ── Controllers ─────────────────────────────────────────────────────────────
   readonly file:   FileController;
@@ -154,7 +160,9 @@ export class DataEngine extends EventEmitter {
     }
     const signals = options.signal ? [options.signal] : [];
     if (timeoutMs > 0) signals.push(AbortSignal.timeout(timeoutMs));
-    return signals.length === 0 ? new AbortController().signal : AbortSignal.any(signals);
+    const signal = signals.length === 0 ? new AbortController().signal : AbortSignal.any(signals);
+    registerDeadline(signal, timeoutMs);
+    return signal;
   }
 
   /**
@@ -186,7 +194,7 @@ export class DataEngine extends EventEmitter {
     if (!logger || !['info', 'warn', 'error', 'debug'].every(level => typeof logger[level as keyof Logger] === 'function')) {
       throw new Error('[PipeX] Logger must implement info, warn, error, and debug');
     }
-    this.#logger = logger;
+    this.#logger = safeLogger(logger);
     return this;
   }
 
@@ -202,7 +210,7 @@ export class DataEngine extends EventEmitter {
    */
   setTracer(tracer: Tracer): this {
     if (!tracer || typeof tracer.startSpan !== 'function') throw new Error('[PipeX] Tracer must implement startSpan');
-    this.#tracer = tracer;
+    this.#tracer = safeTracer(tracer);
     return this;
   }
 
@@ -232,7 +240,8 @@ export class DataEngine extends EventEmitter {
     if (this.#auditLogger) {
       await this.#auditLogger.log({
         ...record,
-        pluginChain: this.#pluginView.map(p => `${p.name}@${p.version}`),
+        pluginChain: record.operation === 'pack' || record.operation === 'unpack'
+          ? [] : [...(this.#requestPipelines.get(record.requestId) ?? this.pipeline)],
         timestamp: Date.now(),
       });
     }
@@ -280,7 +289,7 @@ export class DataEngine extends EventEmitter {
     if (this.#schema) {
       const result = this.#schema.safeParse(data);
       if (!result.success) {
-        throw new Error(`[PipeX] Core Validation failed: ${result.error.message}`);
+        throw new Error('[PipeX] Core Validation failed');
       }
     }
   }
@@ -334,14 +343,41 @@ export class DataEngine extends EventEmitter {
     }
     const requestId = randomUUID();
     this.#activeRequests.add(requestId);
+    this.#requestPipelines.set(requestId, this.pipeline);
     try { this.#logger?.info('[PipeX] Request started', { requestId, ...metadata }); } catch { /* logger isolation */ }
     this.emit('start', requestId);
     return requestId;
   }
 
+  /** Keep capacity reserved for accepted non-cooperative work after caller cancellation. */
+  trackWork(requestId: string, pending: Promise<unknown>): void {
+    let work = this.#pendingWork.get(requestId);
+    if (!work) this.#pendingWork.set(requestId, work = new Set());
+    work.add(pending);
+    const settled = () => {
+      work!.delete(pending);
+      if (work!.size === 0) {
+        this.#pendingWork.delete(requestId);
+        if (this.#finishedRequests.has(requestId)) this.releaseRequest(requestId);
+      }
+    };
+    void pending.then(settled, settled);
+  }
+
+  /** Idempotent cleanup, including error paths that fail before transformation starts. */
+  releaseRequest(requestId: string): void {
+    if (this.#pendingWork.get(requestId)?.size) {
+      this.#finishedRequests.add(requestId);
+      return;
+    }
+    this.#activeRequests.delete(requestId);
+    this.#finishedRequests.delete(requestId);
+    this.#requestPipelines.delete(requestId);
+  }
+
   /** Emits 'end' with optional duration. */
   endRequest(requestId: string, durationMs?: number): void {
-    this.#activeRequests.delete(requestId);
+    this.releaseRequest(requestId);
     try { this.#logger?.info('[PipeX] Request ended', { requestId, durationMs }); } catch { /* logger isolation */ }
     this.emit('end', requestId, durationMs);
   }
@@ -354,7 +390,7 @@ export class DataEngine extends EventEmitter {
   /** Normalises unknown throws → Error and emits 'error'. */
   emitError(err: unknown, requestId: string): void {
     const error = err instanceof Error ? err : new Error(String(err));
-    this.#activeRequests.delete(requestId);
+    this.releaseRequest(requestId);
     try { this.#logger?.error('[PipeX] Request failed', { requestId, error: error.message }); } catch { /* logger isolation */ }
     if (this.listenerCount('error') > 0) this.emit('error', error, requestId);
   }
@@ -365,19 +401,9 @@ export class DataEngine extends EventEmitter {
     event: K,
     ...args: PipeXEventMap[K]
   ): boolean {
-    // Observability hooks must never take down data processing. A user-supplied
-    // listener is outside the pipeline's trust boundary and may throw.
-    try {
-      return super.emit(event, ...args);
-    } catch (error) {
-      try {
-        this.#logger?.error('[PipeX] Event listener failed', {
-          event: String(event),
-          error: error instanceof Error ? error.message : String(error),
-        });
-      } catch { /* logger isolation */ }
-      return false;
-    }
+    const listeners = this.rawListeners(event);
+    for (const listener of listeners) observe(() => Reflect.apply(listener, this, args));
+    return listeners.length > 0;
   }
 
   override on<K extends keyof PipeXEventMap>(

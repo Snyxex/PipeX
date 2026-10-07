@@ -9,6 +9,7 @@
  */
 
 import { Readable, Writable, Transform, PassThrough, Duplex } from 'node:stream';
+import { awaitOperation, throwIfAborted } from '../operations.js';
 import type { DataEngine }                             from '../dataEngine.js';
 import {
   buildTransformChain,
@@ -34,7 +35,7 @@ export class StreamController {
   }
 
   #streamContext(requestId: string, signal: AbortSignal): StreamPluginContext {
-    return { requestId, signal, limits: this.#engine.limits, logger: this.#engine.logger, tracer: this.#engine.tracer };
+    return { requestId, signal, track: pending => this.#engine.trackWork(requestId, pending), limits: this.#engine.limits, logger: this.#engine.logger, tracer: this.#engine.tracer };
   }
 
   #bridge(input: PassThrough, output: PassThrough): Duplex {
@@ -45,6 +46,7 @@ export class StreamController {
 
   #into(destination: Writable, reverse: boolean, options: OperationOptions): Writable {
     const signal = this.#engine.createOperationSignal(options);
+    throwIfAborted(signal);
     if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw byte streams');
     const requestId = this.#engine.startRequest();
     const context = this.#streamContext(requestId, signal);
@@ -92,12 +94,13 @@ export class StreamController {
       ...transforms,
       buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),
     ], destination, { signal }).then(async () => {
-      this.#engine.endRequest(requestId);
-      await this.#engine.emitAudit({
+      await awaitOperation(this.#engine.emitAudit({
         requestId,
         operation: reverse ? 'reverse' : 'process',
         metadata: { controller: 'stream' },
-      });
+      }), signal, pending => this.#engine.trackWork(requestId, pending));
+      throwIfAborted(signal);
+      this.#engine.endRequest(requestId);
       settleEndpoint();
     }).catch(error => {
       const failure = error instanceof Error ? error : new Error(String(error));
@@ -139,6 +142,7 @@ export class StreamController {
    */
   pack(options: OperationOptions = {}): Duplex {
     const signal = this.#engine.createOperationSignal(options);
+    throwIfAborted(signal);
     const requestId = this.#engine.startRequest({ operation: 'pack' });
     const input = new PassThrough({ objectMode: true });
     const output = new PassThrough();
@@ -155,10 +159,10 @@ export class StreamController {
     ];
     const duplex = this.#bridge(input, output);
     runPipeline(input, transforms, output, { signal })
-      .then(() => {
+      .then(async () => {
+        await awaitOperation(this.#engine.emitAudit({ requestId, operation: 'pack', metadata: { controller: 'stream' } }), signal, pending => this.#engine.trackWork(requestId, pending));
+        throwIfAborted(signal);
         this.#engine.endRequest(requestId);
-        void this.#engine.emitAudit({ requestId, operation: 'pack', metadata: { controller: 'stream' } })
-          .catch(error => this.#engine.emitError(error, requestId));
       })
       .catch(error => {
         this.#engine.emitError(error, requestId);
@@ -177,6 +181,7 @@ export class StreamController {
    */
   unpack(options: OperationOptions = {}): Duplex {
     const signal = this.#engine.createOperationSignal(options);
+    throwIfAborted(signal);
     const requestId = this.#engine.startRequest({ operation: 'unpack' });
     const input = new PassThrough();
     const output = new PassThrough({ objectMode: true });
@@ -209,10 +214,10 @@ export class StreamController {
     ];
     const duplex = this.#bridge(input, output);
     runPipeline(input, transforms, output, { signal })
-      .then(() => {
+      .then(async () => {
+        await awaitOperation(this.#engine.emitAudit({ requestId, operation: 'unpack', metadata: { controller: 'stream' } }), signal, pending => this.#engine.trackWork(requestId, pending));
+        throwIfAborted(signal);
         this.#engine.endRequest(requestId);
-        void this.#engine.emitAudit({ requestId, operation: 'unpack', metadata: { controller: 'stream' } })
-          .catch(error => this.#engine.emitError(error, requestId));
       })
       .catch(error => {
         this.#engine.emitError(error, requestId);
@@ -234,6 +239,7 @@ export class StreamController {
    */
   async pipe(source: Readable, destination: Writable, reverse = false, options: OperationOptions = {}): Promise<void> {
     const signal = this.#engine.createOperationSignal(options);
+    throwIfAborted(signal);
     if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw byte streams');
     const requestId  = this.#engine.startRequest();
     const mode       = reverse ? 'decompress' : 'compress';
@@ -252,12 +258,13 @@ export class StreamController {
         ...transforms,
         buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),
       ], destination, { signal });
-      this.#engine.endRequest(requestId);
-      await this.#engine.emitAudit({
+      await awaitOperation(this.#engine.emitAudit({
         requestId,
         operation: reverse ? 'reverse' : 'process',
         metadata: { controller: 'stream' },
-      });
+      }), signal, pending => this.#engine.trackWork(requestId, pending));
+      throwIfAborted(signal);
+      this.#engine.endRequest(requestId);
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
       throw err;

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BasePlugin } from './plugin.js';
-import { UNPACKR } from './core.js';
+import { UNPACKR, assertMessagePackFrameLimits } from './core.js';
+import { DEFAULT_LIMITS } from './resourceLimits.js';
 import { pluginInputLimit, pluginOutputLimit } from './resourceLimits.js';
 import type { ProcessorContext, StreamPluginContext } from './types.js';
 import { Transform } from 'node:stream';
@@ -29,7 +30,7 @@ export class ValidationPlugin extends BasePlugin {
   }
 
   public override async process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
-    this.validate(data, Math.min(pluginInputLimit(ctx), pluginOutputLimit(ctx)));
+    this.validate(data, Math.min(pluginInputLimit(ctx), pluginOutputLimit(ctx)), ctx.limits?.maxFrameBytes);
     return data;
   }
 
@@ -37,13 +38,14 @@ export class ValidationPlugin extends BasePlugin {
     const maxBytes = Math.min(pluginInputLimit(ctx), pluginOutputLimit(ctx));
     if (data.length > maxBytes) throw new Error(`[PipeX] Validation input exceeds ${maxBytes} bytes`);
     if (this.options.validateOnReverse) {
-      this.validate(data, maxBytes);
+      this.validate(data, maxBytes, ctx.limits?.maxFrameBytes);
     }
     return data;
   }
 
-  private validate(data: Buffer, maxBytes: number): void {
+  private validate(data: Buffer, maxBytes: number, maxFrameBytes = DEFAULT_LIMITS.maxFrameBytes): void {
     if (data.length > maxBytes) throw new Error(`[PipeX] Validation input exceeds ${maxBytes} bytes`);
+    assertMessagePackFrameLimits(data, maxFrameBytes, 1);
     let decoded: unknown;
     try {
       decoded = UNPACKR.unpack(data);
@@ -57,7 +59,7 @@ export class ValidationPlugin extends BasePlugin {
     }
   }
 
-  public createStream(_mode?: 'compress' | 'decompress', context?: StreamPluginContext): Transform {
+  public createStream(mode: 'compress' | 'decompress' = 'compress', context?: StreamPluginContext): Transform {
     const chunks: Buffer[] = [];
     let total = 0;
     const maxBytes = Math.min(pluginInputLimit(context), pluginOutputLimit(context));
@@ -73,7 +75,9 @@ export class ValidationPlugin extends BasePlugin {
       flush: (cb) => {
         try {
           const data = Buffer.concat(chunks, total);
-          this.validate(data, maxBytes);
+          if (mode !== 'decompress' || this.options.validateOnReverse) {
+            this.validate(data, maxBytes, context?.limits?.maxFrameBytes);
+          }
           cb(null, data);
         } catch (error) { cb(error as Error); }
       },
