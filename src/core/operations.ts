@@ -1,5 +1,7 @@
 import { OperationAbortedError, OperationTimeoutError } from './errors.js';
 
+import { pendingPromise } from './pendingPromise.js';
+
 const deadlines = new WeakMap<AbortSignal, number>();
 
 export function registerDeadline(signal: AbortSignal, timeoutMs: number): void {
@@ -21,12 +23,16 @@ export function throwIfAborted(signal?: AbortSignal): void {
 }
 
 /** Stop waiting promptly, but account for non-cooperative work until it settles. */
-export async function awaitOperation<T>(
+export function awaitOperation<T>(
   value: T | PromiseLike<T>,
   signal?: AbortSignal,
   track?: (pending: Promise<unknown>) => void,
-): Promise<T> {
-  const promise = Promise.resolve(value);
+): T | Promise<T> {
+  const promise = pendingPromise(value);
+  if (!promise) {
+    throwIfAborted(signal);
+    return value as T;
+  }
   track?.(promise);
   if (!signal) return promise;
   return new Promise<T>((resolve, reject) => {

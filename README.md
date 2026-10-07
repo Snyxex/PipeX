@@ -212,6 +212,9 @@ with `npm audit --audit-level=high`. High and critical advisories are blocking;
 moderate and low advisories remain visible in the report without failing CI.
 See [Jenkins CI](./docs/jenkins.md) for job and agent requirements.
 
+For reproducible binary, stream and file comparisons, run `npm run benchmark:performance`.
+See [Performance measurements](./docs/performance.md) for the matrix and JSON reports.
+
 Large throughput work is intentionally excluded from `npm test` and CI. Run it
 manually with `npm run benchmark:large`; set `PIPEX_BENCHMARK_BYTES` to override
 its 1 GiB default within the guarded 1 MiB to 8 GiB range.
