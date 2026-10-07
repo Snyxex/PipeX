@@ -33,6 +33,7 @@ import { StreamController }     from './controllers/StreamController.js';
 
 import { safeLogger, safeTracer, observe } from './observability.js';
 import { registerDeadline } from './operations.js';
+import type { PluginFactory, PluginRegistry } from './definePlugin.js';
 
 const MAX_TIMER_MS = 0x7fff_ffff;
 
@@ -60,14 +61,33 @@ export class DataEngine extends EventEmitter {
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name) || typeof pluginClass !== 'function') {
       throw new Error('[PipeX] Invalid plugin registration');
     }
-    this.pluginRegistry.set(name, options => new pluginClass(options as TOptions));
+    this.registerPluginFactory(name, options => new pluginClass(options as TOptions));
+  }
+
+  /** Register a factory for config-driven plugins. Explicit registration may replace a name. */
+  public static registerPluginFactory<TOptions>(name: string, factory: PluginFactory<TOptions>): void {
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name) || typeof factory !== 'function') {
+      throw new Error('[PipeX] Invalid plugin registration');
+    }
+    this.pluginRegistry.set(name, options => factory(options as TOptions));
   }
 
   /**
    * Bootstrap a DataEngine from a configuration object.
    */
-  public static async fromConfig(config: EngineConfig): Promise<DataEngine> {
+  public static async fromConfig(config: EngineConfig, factories: PluginRegistry = {}): Promise<DataEngine> {
     if (!config || typeof config !== 'object') throw new Error('[PipeX] Configuration must be an object');
+    if (!factories || typeof factories !== 'object' || Array.isArray(factories)) {
+      throw new Error('[PipeX] Plugin factories must be a registry object');
+    }
+    // Snapshot the registry: this load cannot leak local factories into other engines.
+    const registry = new Map(this.pluginRegistry);
+    for (const [name, factory] of Object.entries(factories)) {
+      if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name) || typeof factory !== 'function') {
+        throw new Error('[PipeX] Invalid plugin registration');
+      }
+      registry.set(name, factory);
+    }
     const engine = new DataEngine(config.limits);
 
     if (config.logger) engine.setLogger(config.logger);
@@ -80,7 +100,10 @@ export class DataEngine extends EventEmitter {
     if (config.plugins) {
       if (!Array.isArray(config.plugins)) throw new Error('[PipeX] Configuration plugins must be an array');
       for (const p of config.plugins) {
-        const createPlugin = this.pluginRegistry.get(p.name);
+        if (!p || typeof p !== 'object' || typeof p.name !== 'string') {
+          throw new Error('[PipeX] Invalid plugin configuration');
+        }
+        const createPlugin = registry.get(p.name);
         if (!createPlugin) throw new Error(`[PipeX] Unknown plugin in config: ${p.name}`);
         try {
           engine.use(createPlugin(p.options));
