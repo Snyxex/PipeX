@@ -16,7 +16,8 @@ request cancellation, and has explicit draining and forced shutdown states.
 
 ### Binary transformations
 
-`binary.run(value)` converts the value to a buffer, applies plugins in registration order, and returns an `EngineResult`. `binary.undo(result, options)` applies reversible plugins in reverse order, honors cancellation and deadlines, and restores the original JavaScript type.
+`binary.run(value)` converts the value to a buffer, applies plugins in registration order, and returns an `EngineResult`. `binary.undo(result, options)` applies reversible plugins in reverse order, honors cancellation and deadlines, and restores the trusted expected JavaScript type. Transported results require
+an application-owned expectedType; received type metadata is never authoritative.
 
 The `EngineResult.pipeline` field records the plugin identifiers used by the operation. It is metadata, not a cryptographic signature.
 
@@ -56,7 +57,9 @@ enforced separately.
 ## Security boundaries
 
 - Input, output, frame, retry, timeout, and concurrency limits are enforced by the engine.
-- File paths are resolved against an allowed root using real filesystem paths.
+- File paths are resolved against an allowed root, then opened through native
+  directory capabilities with no-follow/reparse checks. Commit and cleanup use
+  the acquired directory or file handles; no path-only fallback is used.
 - AES-GCM and ChaCha20-Poly1305 use versioned, independently authenticated
   frames. A frame is never released before its tag verifies. Sequence numbers
   and an authenticated final frame reject reordering, duplication, and

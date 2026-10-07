@@ -4,7 +4,7 @@
  * engine.binary.pack(data)     → Buffer (msgpack)
  * engine.binary.unpack(buf)    → T
  * engine.binary.run(input)     → EngineResult  (plugin pipeline)
- * engine.binary.undo(result)   → T             (round-trip, self-healing)
+ * engine.binary.undo(result)   → T             (trusted-type round-trip)
  */
 
 import type { DataEngine }     from '../dataEngine.js';
@@ -21,8 +21,11 @@ import {
   assertReversiblePipeline,
   assertMessagePackFrameLimits,
   assertKnownValueByteLimit,
+  assertOriginalType,
 } from '../core.js';
-import type { EngineResult, PipeXManifest, OperationOptions } from '../types.js';
+import type { EngineResult, PipeXManifest, OperationOptions, BinaryUndoOptions } from '../types.js';
+
+import { awaitOperation, throwIfAborted } from '../operations.js';
 
 export class BinaryController {
   readonly #engine: DataEngine;
@@ -32,7 +35,7 @@ export class BinaryController {
   }
 
   /**
-   * Serialise any JS value to a msgpack Buffer (synchronous, zero-copy).
+   * Serialise a supported JS value to a msgpack Buffer (synchronous).
    * For streaming large datasets use engine.stream or engine.file.pack instead.
    */
   pack(data: unknown): Buffer {
@@ -45,6 +48,7 @@ export class BinaryController {
       const packed = PACKR.pack(data) as Buffer;
       if (packed.length > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Packed input exceeds configured limit');
       assertMessagePackFrameLimits(packed, this.#engine.limits.maxFrameBytes, 1);
+      if (packed.length > this.#engine.limits.maxOutputBytes) throw new Error('[PipeX] Packed output exceeds configured limit');
       return packed;
     } catch (err: unknown) {
       if (err instanceof Error && err.message.startsWith('[PipeX]')) throw err;
@@ -66,214 +70,162 @@ export class BinaryController {
     }
   }
 
-  /**
-   * Run input through the full plugin pipeline.
-   * Returns an EngineResult that carries originalType so undo() can round-trip.
-   */
+  // Only locally produced buffers carry a trusted implicit type. Transported
+  // results must be decoded using an application-owned expectedType.
+  readonly #trustedTypes = new WeakMap<Buffer, string>();
+
   async run(input: unknown, options: OperationOptions = {}): Promise<EngineResult> {
     const signal = this.#engine.createOperationSignal(options);
-    const requestId    = this.#engine.startRequest({ operation: 'run' });
-    const startTime    = Date.now();
+    throwIfAborted(signal);
     const originalType = detectType(input);
-
+    assertOriginalType(originalType);
+    const plugins = this.#engine.plugins;
+    const pipeline = [...this.#engine.pipeline];
+    const limits = this.#engine.limits;
+    const requestId = this.#engine.startRequest({ operation: 'run' });
+    const startTime = Date.now();
     const span = this.#engine.tracer?.startSpan('binary:run', { requestId } as any);
-    span?.setAttribute('input.type', originalType);
-
-    // Core Input Validation
     try {
+      span?.setAttribute('input.type', originalType);
       this.#engine.validate(input);
-    } catch (err: unknown) {
-      this.#engine.emitError(err, requestId);
-      span?.setAttribute('error', true);
-      span?.end();
-      throw err;
-    }
-
-    let data: Buffer;
-    try {
-      assertKnownValueByteLimit(input, this.#engine.limits.maxInputBytes, 'Input');
-      data = toBuffer(input);
-      if (data.length > this.#engine.limits.maxInputBytes) throw new Error('[PipeX] Input exceeds configured limit');
+      assertKnownValueByteLimit(input, limits.maxInputBytes, 'Input');
+      let data = toBuffer(input);
+      if (data.length > limits.maxInputBytes) throw new Error('[PipeX] Input exceeds configured limit');
+      if (originalType === 'object' || originalType === 'array') {
+        assertMessagePackFrameLimits(data, limits.maxFrameBytes, 1);
+      }
+      const metrics: Record<string, number> = Object.create(null);
+      for (const plugin of plugins) {
+        const t0 = Date.now();
+        const pSpan = this.#engine.tracer?.startSpan(`plugin:${plugin.name}`, { requestId } as any);
+        try {
+          pSpan?.setAttribute('mode', 'process');
+          const ctx = makeContext(requestId, { originalType }, this.#engine.logger, pSpan, signal, limits);
+          data = await withRetry(() => plugin.process(data, ctx), plugin.retryOptions, this.#engine.logger, {
+            signal, limits, track: pending => this.#engine.trackWork(requestId, pending),
+          });
+          if (!Buffer.isBuffer(data) || data.length > limits.maxOutputBytes) throw new Error('[PipeX] Plugin output exceeds configured limit');
+        } catch (error) {
+          pSpan?.setAttribute('error', true);
+          throw error;
+        } finally { pSpan?.end(); }
+        metrics[plugin.name] = Date.now() - t0;
+        this.#engine.emit('plugin:after', plugin.name, metrics[plugin.name]!);
+      }
+      if (data.length > limits.maxOutputBytes) throw new Error('[PipeX] Output exceeds configured limit');
+      throwIfAborted(signal);
+      const durationMs = Date.now() - startTime;
+      await awaitOperation(this.#engine.emitAudit({
+        requestId, operation: 'process', metadata: { inputType: originalType, durationMs },
+      }), signal, pending => this.#engine.trackWork(requestId, pending));
+      throwIfAborted(signal);
+      this.#trustedTypes.set(data, originalType);
+      const result: EngineResult = { data, originalType, pipeline, metrics: { durationMs, steps: metrics } };
+      span?.setAttribute('duration_ms', durationMs);
+      this.#engine.endRequest(requestId, durationMs);
+      return result;
     } catch (error) {
+      span?.setAttribute('error', true);
       this.#engine.emitError(error, requestId);
       throw error;
-    }
-    const metrics: Record<string, number> = {};
-
-    try {
-      for (const plugin of this.#engine.plugins) {
-        const t0  = Date.now();
-        const pSpan = this.#engine.tracer?.startSpan(`plugin:${plugin.name}`, { requestId } as any);
-        pSpan?.setAttribute('mode', 'process');
-        
-        try {
-          const ctx = makeContext(requestId, { originalType }, this.#engine.logger, pSpan, signal, this.#engine.limits);
-          data = await withRetry(() => plugin.process(data, ctx), plugin.retryOptions, this.#engine.logger, { signal, limits: this.#engine.limits });
-          if (data.length > this.#engine.limits.maxOutputBytes) throw new Error(`[PipeX] Plugin output exceeds configured limit`);
-        } catch (e) {
-          pSpan?.setAttribute('error', true);
-          throw e;
-        } finally {
-          pSpan?.end();
-        }
-
-        const dur = Date.now() - t0;
-        metrics[plugin.name] = dur;
-        this.#engine.emit('plugin:after', plugin.name, dur);
-      }
-    } catch (err: unknown) {
-      this.#engine.emitError(err, requestId);
-      span?.setAttribute('error', true);
+    } finally {
       span?.end();
-      throw err;
+      this.#engine.releaseRequest(requestId);
     }
-
-    const durationMs = Date.now() - startTime;
-    this.#engine.endRequest(requestId, durationMs);
-    span?.setAttribute('duration_ms', durationMs);
-    span?.end();
-
-    await this.#engine.emitAudit({
-      requestId,
-      operation: 'process',
-      metadata: { inputType: originalType, durationMs },
-    });
-
-    return {
-      data,
-      originalType,
-      pipeline: this.#engine.plugins.map(p => `${p.name}@${p.version}`),
-      metrics:  { durationMs, steps: metrics },
-    };
   }
 
-  /**
-   * Reverse the plugin pipeline for a previously processed EngineResult.
-   *
-   * Self-healing: if the result carries a manifest (written by file.pack),
-   * the plugin chain is read from it — no manual forceType needed.
-   *
-   * Overload 1: undo(result)               — uses result.originalType
-   * Overload 2: undo(buffer, forceType)    — for externally produced buffers
-   */
-  async undo<T = unknown>(result: EngineResult, options?: OperationOptions): Promise<T>;
+  async undo<T = unknown>(result: EngineResult, options?: BinaryUndoOptions): Promise<T>;
   async undo<T = unknown>(input: Buffer, forceType: string, options?: OperationOptions): Promise<T>;
   async undo<T = unknown>(
     inputOrResult: Buffer | EngineResult,
-    forceTypeOrOptions?: string | OperationOptions,
+    forceTypeOrOptions?: string | BinaryUndoOptions,
     operationOptions: OperationOptions = {},
   ): Promise<T> {
-    const isResult   = !Buffer.isBuffer(inputOrResult);
-    if (!isResult && (typeof forceTypeOrOptions !== 'string' || forceTypeOrOptions.length === 0)) {
-      throw new Error('[PipeX] binary.undo(buffer, forceType) requires a non-empty forceType');
+    const raw = Buffer.isBuffer(inputOrResult);
+    let data: Buffer;
+    let origType: string;
+    let options: OperationOptions;
+    if (raw) {
+      assertOriginalType(forceTypeOrOptions);
+      data = inputOrResult;
+      origType = forceTypeOrOptions;
+      options = operationOptions;
+    } else {
+      const result = inputOrResult;
+      if (!result || typeof result !== 'object' || !Buffer.isBuffer(result.data)
+        || !Array.isArray(result.pipeline) || result.pipeline.length > 256
+        || !result.pipeline.every(p => typeof p === 'string' && p.length <= 512)
+        || !result.metrics || !Number.isFinite(result.metrics.durationMs) || result.metrics.durationMs < 0
+        || !result.metrics.steps || typeof result.metrics.steps !== 'object' || Array.isArray(result.metrics.steps)
+        || !Object.values(result.metrics.steps).every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0)) {
+        throw new Error('[PipeX] Invalid EngineResult');
+      }
+      assertOriginalType(result.originalType);
+      if (forceTypeOrOptions !== undefined && (forceTypeOrOptions === null || typeof forceTypeOrOptions !== 'object')) {
+        throw new Error('[PipeX] Invalid undo options');
+      }
+      const undoOptions = forceTypeOrOptions as BinaryUndoOptions | undefined;
+      const trustedType = undoOptions?.expectedType ?? this.#trustedTypes.get(result.data);
+      if (trustedType === undefined) throw new Error('[PipeX] Transported EngineResult requires a trusted expectedType');
+      assertOriginalType(trustedType);
+      if (trustedType !== result.originalType) throw new Error('[PipeX] Result type does not match the expected type');
+      data = result.data;
+      origType = trustedType;
+      options = undoOptions ?? {};
     }
-    let   data       = isResult ? (inputOrResult as EngineResult).data : (inputOrResult as Buffer);
-    const origType   = isResult
-      ? (inputOrResult as EngineResult).originalType
-      : (forceTypeOrOptions as string);
-    const options = isResult && typeof forceTypeOrOptions === 'object'
-      ? forceTypeOrOptions
-      : operationOptions;
     const signal = this.#engine.createOperationSignal(options);
+    throwIfAborted(signal);
     const plugins = this.#engine.plugins;
     assertReversiblePipeline(plugins);
-
-    const requestId  = this.#engine.startRequest({ operation: 'undo', originalType: origType });
+    const limits = this.#engine.limits;
+    if (data.length > limits.maxInputBytes) throw new Error('[PipeX] Undo input exceeds configured limit');
+    const requestId = this.#engine.startRequest({ operation: 'undo', originalType: origType });
     const span = this.#engine.tracer?.startSpan('binary:undo', { requestId } as any);
-
-    if (data.length > this.#engine.limits.maxInputBytes) {
-      const error = new Error('[PipeX] Undo input exceeds configured limit');
-      this.#engine.emitError(error, requestId);
-      span?.setAttribute('error', true);
-      span?.end();
-      throw error;
-    }
-
-    // If it looks like a manifest-prepended buffer, extract it for validation
-    if (Buffer.isBuffer(inputOrResult) && inputOrResult.length > 0) {
-      let manifest: PipeXManifest | undefined;
-      try {
-        const parsed = this.unpackWithManifest(inputOrResult);
-        manifest = parsed.manifest;
-        const actualData = parsed.data;
-        data = actualData as Buffer;
-      } catch {
-        // Not a manifest buffer, continue with raw input
-      }
-      if (manifest) {
-        const currentPipeline = this.#engine.plugins.map(p => `${p.name}@${p.version}`);
-        if (JSON.stringify(currentPipeline) !== JSON.stringify(manifest.plugins)) {
-          const error = new Error('[PipeX] Manifest plugin chain does not match the configured engine');
-          this.#engine.emitError(error, requestId);
-          span?.setAttribute('error', true);
-          span?.end();
-          throw error;
-        }
-      }
-    }
-
     try {
-      signal.throwIfAborted();
-      for (const plugin of [...plugins].reverse()) {
-        
-        const pSpan = this.#engine.tracer?.startSpan(`plugin:${plugin.name}`, { requestId } as any);
-        pSpan?.setAttribute('mode', 'reverse');
-        
-        try {
-          const ctx = makeContext(requestId, { originalType: origType }, this.#engine.logger, pSpan, signal, this.#engine.limits);
-          data = await withRetry(
-            () => plugin.reverse!(data, ctx),
-            plugin.retryOptions,
-            this.#engine.logger,
-            { signal, limits: this.#engine.limits },
-          );
-          if (data.length > this.#engine.limits.maxOutputBytes) throw new Error('[PipeX] Plugin output exceeds configured limit');
-        } catch (e) {
-          pSpan?.setAttribute('error', true);
-          throw e;
-        } finally {
-          pSpan?.end();
+      // Serialization manifests are never parsed ahead of cryptographic checks.
+      if (raw && plugins.length === 0 && data.length > 0) {
+        let parsed: { manifest: PipeXManifest; data: unknown } | undefined;
+        try { parsed = this.unpackWithManifest(data); } catch { /* raw input */ }
+        if (parsed) {
+          if (parsed.manifest.plugins.length !== 0) throw new Error('[PipeX] Manifest plugin chain does not match the configured engine');
+          if (detectType(parsed.data) !== origType) throw new Error('[PipeX] Manifest data does not match the expected type');
+          data = toBuffer(parsed.data);
         }
-        
+      }
+      for (const plugin of [...plugins].reverse()) {
+        const pSpan = this.#engine.tracer?.startSpan(`plugin:${plugin.name}`, { requestId } as any);
+        try {
+          pSpan?.setAttribute('mode', 'reverse');
+          const ctx = makeContext(requestId, { originalType: origType }, this.#engine.logger, pSpan, signal, limits);
+          data = await withRetry(() => plugin.reverse!(data, ctx), plugin.retryOptions, this.#engine.logger, {
+            signal, limits, track: pending => this.#engine.trackWork(requestId, pending),
+          });
+          if (!Buffer.isBuffer(data) || data.length > limits.maxOutputBytes) throw new Error('[PipeX] Plugin output exceeds configured limit');
+        } catch (error) {
+          pSpan?.setAttribute('error', true);
+          throw error;
+        } finally { pSpan?.end(); }
         this.#engine.emit('plugin:after', plugin.name, 0);
       }
-    } catch (err: unknown) {
-      this.#engine.emitError(err, requestId);
-      span?.setAttribute('error', true);
-      span?.end();
-      throw err;
-    }
-
-    let restored: T;
-    try {
-      restored = fromBuffer(data, origType) as T;
-    } catch (err: unknown) {
-      this.#engine.emitError(err, requestId);
-      span?.setAttribute('error', true);
-      span?.end();
-      throw err;
-    }
-
-    // Core Output Validation
-    try {
+      if (data.length > limits.maxOutputBytes) throw new Error('[PipeX] Output exceeds configured limit');
+      throwIfAborted(signal);
+      const restored = fromBuffer(data, origType, limits.maxFrameBytes) as T;
       this.#engine.validate(restored);
-    } catch (err: unknown) {
-      this.#engine.emitError(err, requestId);
+      throwIfAborted(signal);
+      await awaitOperation(this.#engine.emitAudit({
+        requestId, operation: 'reverse', metadata: { originalType: origType },
+      }), signal, pending => this.#engine.trackWork(requestId, pending));
+      throwIfAborted(signal);
+      this.#engine.endRequest(requestId);
+      return restored;
+    } catch (error) {
       span?.setAttribute('error', true);
+      this.#engine.emitError(error, requestId);
+      throw error;
+    } finally {
       span?.end();
-      throw err;
+      this.#engine.releaseRequest(requestId);
     }
-
-    this.#engine.endRequest(requestId);
-    span?.end();
-
-    await this.#engine.emitAudit({
-      requestId,
-      operation: 'reverse',
-      metadata: { originalType: origType },
-    });
-    
-    return restored;
   }
 
   /**
@@ -294,7 +246,7 @@ export class BinaryController {
     const dFrame   = PACKR.pack(data);
     assertMessagePackFrameLimits(mFrame, this.#engine.limits.maxFrameBytes, 1);
     assertMessagePackFrameLimits(dFrame, this.#engine.limits.maxFrameBytes, 1);
-    if (mFrame.length + dFrame.length > this.#engine.limits.maxInputBytes) {
+    if (mFrame.length + dFrame.length > Math.min(this.#engine.limits.maxInputBytes, this.#engine.limits.maxOutputBytes)) {
       throw new Error('[PipeX] Serialized input exceeds configured limit');
     }
     return Buffer.concat([mFrame, dFrame]);
@@ -315,7 +267,7 @@ export class BinaryController {
     const frames: unknown[] = [];
     try {
       UNPACKR.unpackMultiple(input, (value) => {
-        if (frames.length >= this.#engine.limits.maxFrames) throw new Error('[PipeX] Frame count exceeds configured limit');
+        if (frames.length >= 2) throw new Error('[PipeX] Frame count exceeds configured limit');
         frames.push(value);
       });
     } catch (err: unknown) {

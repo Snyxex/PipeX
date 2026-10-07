@@ -25,9 +25,13 @@ All defaults are finite. `maxFrameBytes` applies to each top-level MessagePack
 value, while `maxFrames` counts application values (the PipeX manifest is not an
 application value). Incoming frame structure and declared string, binary, array,
 map, and extension lengths are checked before decoding. PipeX's bounded wire
-format rejects the context-dependent C1 token plus msgpackr record-definition
-and bundled-string extensions because they can change how bytes following an
-extension are interpreted; PipeX's own encoders disable those formats.
+writers preserve Set, Error and RegExp using msgpackr moreTypes. The bounded
+format includes their extension prefixes and their subsequent
+value in the same logical frame. It permits payload-contained undefined, BigInt,
+typed-array and timestamp extensions. C1, records, bundled strings, structured
+references and unknown extensions are rejected; PipeX's encoders disable records,
+bundles and structured cloning. Custom msgpackr extension registration is outside
+this wire profile.
 
 Native and buffer-based standard plugins receive the same immutable request
 limits. Their temporary buffers and predictable output sizes are checked before
@@ -43,6 +47,46 @@ default). Provider key identifiers are independently bounded as UTF-8 by
 while a request is active is rejected so a pipeline cannot observe mixed limits.
 
 Callers can supply `{ signal, timeoutMs }` to binary, file, and stream operations. A timeout of `0` disables only the per-operation deadline; input and output limits remain active.
+
+Deadlines stop waiting for plugin promises, including plugins that ignore their
+signal. Non-cooperative work still occupies concurrency capacity until its
+promise settles. Late results are discarded. This prevents repeated timeouts
+from starting unbounded background tasks; use workers for terminable CPU work.
+Synchronous work cannot be preempted, but cannot report success after its deadline.
+
+## File-system boundary
+
+Keep the allowed root, its configuration, and input/output directories private
+and controlled by the service account. Path containment is a directory-entry
+boundary, not a sandbox against application code, the same OS identity,
+administrators, mount-namespace changes, or modification of file contents by
+principals already authorized to write them.
+
+File sessions bind directories and input/output objects before plugin callbacks:
+
+- Windows opens the root with CreateFileW, verifies its final handle path, and
+  opens each child relative to a directory handle with NtCreateFile and
+  FILE_OPEN_REPARSE_POINT. Reparse points and non-disk/non-regular files are
+  rejected. Directory handles exclude delete sharing; input and temporary
+  output handles also exclude write sharing. The temporary output is renamed
+  relative to the pinned destination directory with NtSetInformationFile, and
+  failure cleanup deletes that exact opened object by handle.
+- POSIX opens directory components with O_DIRECTORY/O_NOFOLLOW and opens files
+  using openat. A mode-0700 temporary directory with verified ownership and
+  permissions protects its mode-0600 output file. renameat and unlinkat operate
+  relative to the acquired directory descriptors. Renaming a directory after
+  admission does not redirect work through a replacement symlink; the session
+  continues using the original directory capability.
+
+Native reads/writes run asynchronously with backpressure. Disposal waits for
+pending native I/O before closing handles, including error/cancellation paths.
+Native-binding or filesystem failures reject the file operation; there is no
+fallback to a path-only open. Binary and stream APIs do not load native bindings.
+Koffi 3.3.2 is pinned and its platform package must be included in installation.
+
+The implementation follows the documented [NtCreateFile RootDirectory contract](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile),
+[Windows rename information](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info),
+and [POSIX directory-relative opens](https://man7.org/linux/man-pages/man2/openat.2.html).
 
 ## Logging and events
 
@@ -135,6 +179,21 @@ shutdown. `close({ force: true })` terminates running and queued work immediatel
 those task promises reject as `WorkerTaskError`. A graceful-close timeout rejects
 as `WorkerPoolCloseError` after terminating the pool. New work rejects as
 `WorkerPoolClosedError` as soon as shutdown begins.
+
+### Worker stream format migration
+
+WorkerPoolPlugin 5 writes PXWK v1 streams: a five-byte magic/version header,
+length-prefixed transformed task records, and an explicit end marker. Each
+reverse task receives exactly one forward task result, independent of transport
+chunk boundaries. Frame size/count and aggregate byte limits apply. The format
+provides framing, not authentication; use an outer encryption or HMAC plugin
+when required.
+
+Binary worker processing retains the caller's raw transform format. Worker
+streams from 4.x had no recoverable task boundaries and are rejected by 5.x.
+Before upgrading, decode existing streams with the old application and its
+original chunk-boundary contract, then re-encode them. Do not guess boundaries
+or silently reinterpret raw bytes as framed records.
 
 ## Encryption and key management
 

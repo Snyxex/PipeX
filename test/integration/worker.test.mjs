@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { test } from 'node:test';
 import {
   DataEngine,
+  CompressionPlugin,
+  EncryptionPlugin,
+  HashingPlugin,
   OperationTimeoutError,
   UnsupportedReverseError,
   WorkerPoolClosedError,
@@ -158,4 +162,44 @@ test('worker pool validates queue and worker configuration', async () => {
   const plugin = new WorkerPoolPlugin({ filename, maxThreads: 1 });
   await assert.rejects(plugin.close({ force: 'yes' }), /force must be a boolean/);
   await plugin.close();
+});
+
+
+test('worker stream framing preserves whole-task reversibility across arbitrary transport chunks', async () => {
+  const plugin = new WorkerPoolPlugin({ filename, processName: 'encode', reverseName: 'decode', maxThreads: 1 });
+  const collect = chunks => new Writable({ write(chunk, _, cb) { chunks.push(Buffer.from(chunk)); cb(); } });
+  try {
+    const engine = new DataEngine({ maxFrameBytes: 32 }).use(plugin);
+    const input = Buffer.from('whole-task reversibility requires boundaries '.repeat(12));
+    const packed = [];
+    await engine.stream.pipe(Readable.from([input.subarray(0, 7), input.subarray(7)]), collect(packed));
+    const wire = Buffer.concat(packed);
+    assert.equal(wire.subarray(0, 5).toString('hex'), '5058574b01');
+    const restored = [];
+    await engine.stream.pipe(Readable.from([...wire].map(byte => Buffer.from([byte]))), collect(restored), true);
+    assert.deepEqual(Buffer.concat(restored), input);
+    await assert.rejects(engine.stream.pipe(Readable.from([wire.subarray(0, wire.length - 1)]), collect([]), true), /Incomplete worker stream/);
+    await assert.rejects(engine.stream.pipe(Readable.from([Buffer.concat([wire, Buffer.from([0])])]), collect([]), true), /trailing bytes/);
+    const oversized = Buffer.concat([wire.subarray(0, 5), Buffer.from([0, 0, 0, 33])]);
+    await assert.rejects(engine.stream.pipe(Readable.from([oversized]), collect([]), true), /frame exceeds/);
+  } finally { await plugin.close(); }
+});
+
+
+test('worker framing survives compression, encryption and HMAC with different receive chunks', async () => {
+  const plugin = new WorkerPoolPlugin({ filename, processName: 'encode', reverseName: 'decode', maxThreads: 1 });
+  const collect = chunks => new Writable({ write(chunk, _, cb) { chunks.push(Buffer.from(chunk)); cb(); } });
+  try {
+    const engine = new DataEngine({ maxFrameBytes: 64 }).use(plugin)
+      .use(new CompressionPlugin({ type: 'gzip' }))
+      .use(new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: randomBytes(32) }))
+      .use(new HashingPlugin({ algorithm: 'sha256', secret: 'independent-test-secret-123' }));
+    const input = Buffer.from('worker whole-task semantics '.repeat(20));
+    const encoded = [];
+    await engine.stream.pipe(Readable.from([input.subarray(0, 13), input.subarray(13)]), collect(encoded));
+    const bytes = Buffer.concat(encoded);
+    const output = [];
+    await engine.stream.pipe(Readable.from([...bytes].map(byte => Buffer.from([byte]))), collect(output), true);
+    assert.deepEqual(Buffer.concat(output), input);
+  } finally { await plugin.close(); }
 });

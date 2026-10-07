@@ -7,14 +7,11 @@
  * engine.file.unpack(input, output)   → read msgpack, write NDJSON
  */
 
-import { createReadStream, createWriteStream, existsSync, realpathSync } from 'node:fs';
-import { rename, rm } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
-import { Transform } from 'node:stream';
+import { Transform, type Readable, type Writable } from 'node:stream';
+import { openAtomicFileSession } from '../secureFiles.js';
+import { awaitOperation, throwIfAborted } from '../operations.js';
 import type { DataEngine }                     from '../dataEngine.js';
 import {
-  assertExists,
-  resolveOutputPath,
   buildManifest,
   buildManifestHeaderTransform,
   buildManifestExtractTransform,
@@ -23,7 +20,6 @@ import {
   createPackrStream,
   createUnpackrStream,
   runPipeline,
-  DEFAULT_HIGH_WATER,
   buildByteLimitTransform,
   buildFrameLimitTransform,
   buildObjectLimitTransform,
@@ -42,25 +38,19 @@ export class FileController {
     inputPath: string,
     outputPath: string,
     allowedRoot: string | undefined,
-    run: (input: string, temporaryOutput: string) => Promise<void>,
+    signal: AbortSignal,
+    run: (source: Readable, destination: Writable) => Promise<void>,
   ): Promise<void> {
-    const input = assertExists(inputPath, allowedRoot);
-    const output = resolveOutputPath(outputPath, allowedRoot);
-    if (existsSync(output) && realpathSync.native(output) === input) {
-      throw new Error('[PipeX] Input and output must be different files');
-    }
-    const temporary = `${output}.pipex-${randomUUID()}.tmp`;
+    const session = openAtomicFileSession(inputPath, outputPath, allowedRoot);
     try {
-      await run(input, temporary);
-      await rename(temporary, output);
-    } catch (error) {
-      await rm(temporary, { force: true }).catch(() => undefined);
-      throw error;
-    }
+      await run(session.source, session.destination);
+      throwIfAborted(signal);
+      session.commit();
+    } finally { await session.dispose(); }
   }
 
   #streamContext(requestId: string, signal: AbortSignal): StreamPluginContext {
-    return { requestId, signal, limits: this.#engine.limits, logger: this.#engine.logger, tracer: this.#engine.tracer };
+    return { requestId, signal, track: pending => this.#engine.trackWork(requestId, pending), limits: this.#engine.limits, logger: this.#engine.logger, tracer: this.#engine.tracer };
   }
 
   /**
@@ -68,12 +58,11 @@ export class FileController {
    */
   async process(inputPath: string, outputPath: string, allowedRoot?: string, options: OperationOptions = {}): Promise<void> {
     const signal = this.#engine.createOperationSignal(options);
+    throwIfAborted(signal);
     const requestId = this.#engine.startRequest();
     try {
       if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw file streams');
-      await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, async (input, temporary) => {
-        const src = createReadStream(input, { highWaterMark: DEFAULT_HIGH_WATER });
-        const dst = createWriteStream(temporary, { flags: 'wx', mode: 0o600 });
+      await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, signal, async (src, dst) => {
         const context = this.#streamContext(requestId, signal);
         const transforms = [
           buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'),
@@ -82,8 +71,9 @@ export class FileController {
         ];
         await runPipeline(src, transforms, dst, { signal });
       });
+      await awaitOperation(this.#engine.emitAudit({ requestId, operation: 'process', metadata: { controller: 'file' } }), signal, pending => this.#engine.trackWork(requestId, pending));
+      throwIfAborted(signal);
       this.#engine.endRequest(requestId);
-      await this.#engine.emitAudit({ requestId, operation: 'process', metadata: { controller: 'file' } });
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
       throw err;
@@ -95,12 +85,11 @@ export class FileController {
    */
   async reverse(inputPath: string, outputPath: string, allowedRoot?: string, options: OperationOptions = {}): Promise<void> {
     const signal = this.#engine.createOperationSignal(options);
+    throwIfAborted(signal);
     const requestId = this.#engine.startRequest();
     try {
       if (this.#engine.schema) throw new Error('[PipeX] Global object schemas cannot validate raw file streams');
-      await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, async (input, temporary) => {
-        const src = createReadStream(input, { highWaterMark: DEFAULT_HIGH_WATER });
-        const dst = createWriteStream(temporary, { flags: 'wx', mode: 0o600 });
+      await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, signal, async (src, dst) => {
         const context = this.#streamContext(requestId, signal);
         const transforms = [
           buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'),
@@ -109,8 +98,9 @@ export class FileController {
         ];
         await runPipeline(src, transforms, dst, { signal });
       });
+      await awaitOperation(this.#engine.emitAudit({ requestId, operation: 'reverse', metadata: { controller: 'file' } }), signal, pending => this.#engine.trackWork(requestId, pending));
+      throwIfAborted(signal);
       this.#engine.endRequest(requestId);
-      await this.#engine.emitAudit({ requestId, operation: 'reverse', metadata: { controller: 'file' } });
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
       throw err;
@@ -121,15 +111,14 @@ export class FileController {
    * Source file → PackrStream → manifest header → Destination msgpack file.
    *
    * Output format: [ PipeXManifest frame ][ ...data frames ]
-   * The manifest encodes the plugin chain so reverse() is self-healing.
+   * The serialization-only manifest declares an empty plugin chain.
    */
   async pack(inputPath: string, outputPath: string, allowedRoot?: string, options: OperationOptions = {}): Promise<void> {
     const signal = this.#engine.createOperationSignal(options);
+    throwIfAborted(signal);
     const requestId = this.#engine.startRequest();
     try {
-      await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, async (input, temporary) => {
-        const src = createReadStream(input, { highWaterMark: DEFAULT_HIGH_WATER });
-        const dst = createWriteStream(temporary, { flags: 'wx', mode: 0o600 });
+      await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, signal, async (src, dst) => {
         const transforms = [
           buildByteLimitTransform(this.#engine.limits.maxInputBytes, 'input'),
           buildObjectLimitTransform(this.#engine.limits.maxFrames),
@@ -144,8 +133,9 @@ export class FileController {
         ];
         await runPipeline(src, transforms, dst, { signal });
       });
+      await awaitOperation(this.#engine.emitAudit({ requestId, operation: 'pack', metadata: { controller: 'file' } }), signal, pending => this.#engine.trackWork(requestId, pending));
+      throwIfAborted(signal);
       this.#engine.endRequest(requestId);
-      await this.#engine.emitAudit({ requestId, operation: 'pack', metadata: { controller: 'file' } });
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
       throw err;
@@ -159,11 +149,10 @@ export class FileController {
    */
   async unpack(inputPath: string, outputPath: string, allowedRoot?: string, options: OperationOptions = {}): Promise<void> {
     const signal = this.#engine.createOperationSignal(options);
+    throwIfAborted(signal);
     const requestId = this.#engine.startRequest();
     try {
-      await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, async (input, temporary) => {
-        const src = createReadStream(input, { highWaterMark: DEFAULT_HIGH_WATER });
-        const dst = createWriteStream(temporary, { flags: 'wx', mode: 0o600 });
+      await this.#withAtomicOutput(inputPath, outputPath, allowedRoot, signal, async (src, dst) => {
         const unpacker = createUnpackrStream(this.#engine.limits.maxInputBytes);
         const extract = buildManifestExtractTransform((manifest: PipeXManifest) => {
           const expected: string[] = [];
@@ -195,8 +184,9 @@ export class FileController {
           buildByteLimitTransform(this.#engine.limits.maxOutputBytes, 'output'),
         ], dst, { signal });
       });
+      await awaitOperation(this.#engine.emitAudit({ requestId, operation: 'unpack', metadata: { controller: 'file' } }), signal, pending => this.#engine.trackWork(requestId, pending));
+      throwIfAborted(signal);
       this.#engine.endRequest(requestId);
-      await this.#engine.emitAudit({ requestId, operation: 'unpack', metadata: { controller: 'file' } });
     } catch (err: unknown) {
       this.#engine.emitError(err, requestId);
       throw err;

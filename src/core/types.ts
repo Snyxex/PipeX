@@ -48,7 +48,14 @@ export interface OperationOptions {
   timeoutMs?: number;
 }
 
+/** expectedType must come from trusted application configuration, never the received result. */
+export interface BinaryUndoOptions extends OperationOptions {
+  expectedType?: string;
+}
+
 export interface StreamPluginContext {
+  /** Engine-owned accounting for work that continues after cancellation. */
+  readonly track?: (pending: Promise<unknown>) => void;
   readonly requestId: string;
   readonly signal: AbortSignal;
   readonly limits: Readonly<EngineLimits>;

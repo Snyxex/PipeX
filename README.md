@@ -50,6 +50,13 @@ Generic KMS adapters expose queryable operation capabilities and receive an
 
 `pack()` and `unpack()` never encrypt, compress, or hash. Use `run()`/`undo()`, `process()`/`reverse()`, or `stream.pipe()` for plugin transformations.
 
+For results received over a transport or reconstructed from storage, specify an
+application-owned type: `engine.binary.undo(received, { expectedType: 'object' })`.
+Never derive `expectedType` or the raw-buffer `forceType` from untrusted metadata.
+Locally produced results retain an implicit trusted type while their Buffer
+identity is preserved. This tightens the decoding contract without changing the
+ciphertext format; modified type metadata is rejected before decryption.
+
 ## Files
 
 Output paths are constrained to `allowedRoot`. When it is omitted, PipeX uses the current working directory. Parent directories must already exist.
@@ -59,7 +66,13 @@ await engine.file.process('./data/input.bin', './data/input.pipex', './data', { 
 await engine.file.reverse('./data/input.pipex', './data/restored.bin', './data');
 ```
 
-PipeX rejects traversal, symlink escapes, and identical input/output files. Outputs are written to a private temporary file and renamed after successful completion.
+PipeX rejects traversal, symlink escapes, special files, and identical or hard-linked
+input/output files. File sessions acquire native handles before plugins run.
+Windows uses root-relative opens and handle-based replacement; POSIX uses
+no-follow directory-relative opens and a private temporary directory. Outputs
+are replaced only after successful processing. Koffi supplies the native bindings
+and is loaded only when using the file controller. Keep roots under the service
+account's exclusive control; see [File-system boundary](./docs/enterprise.md#file-system-boundary).
 
 ## Streams and cancellation
 
