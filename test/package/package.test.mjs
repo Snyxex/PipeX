@@ -51,7 +51,11 @@ test('dry-run tarball contains only the public release payload', () => {
     '--cache',
     '.npm',
   ], { cwd: new URL('../..', import.meta.url), encoding: 'utf8' });
-  const [pack] = JSON.parse(output);
+  // npm may print lifecycle/build output before the machine-readable pack JSON.
+  // Locate the JSON array rather than assuming stdout starts with it.
+  const jsonMatch = /^\[\s*\{/m.exec(output);
+  assert.ok(jsonMatch, 'npm pack did not emit a JSON package manifest');
+  const [pack] = JSON.parse(output.slice(jsonMatch.index));
   const actual = pack.files.map(file => file.path).sort();
   assert.deepEqual(actual, [
     'LICENSE',
