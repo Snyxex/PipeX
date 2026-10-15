@@ -65,19 +65,19 @@ test('every automated test belongs to an explicit suite', async () => {
 
   const jenkinsfile = await readFile(resolve('Jenkinsfile'), 'utf8');
   const jenkinsDocs = await readFile(resolve('docs/jenkins.md'), 'utf8');
-  assert.match(jenkinsfile, /agent \\{ label 'linux' \\}/);
-  assert.match(jenkinsfile, /disableConcurrentBuilds\\(abortPrevious: true\\)/);
-  assert.match(jenkinsfile, /skipDefaultCheckout\\(true\\)/);
+  assert.match(jenkinsfile, /agent \{ label 'linux' \}/);
+  assert.match(jenkinsfile, /disableConcurrentBuilds\(abortPrevious: true\)/);
+  assert.match(jenkinsfile, /skipDefaultCheckout\(true\)/);
   assert.match(jenkinsfile, /checkout scm/);
   assert.match(jenkinsfile, /CHANGE_ID/);
-  assert.match(jenkinsfile, /mise exec node@20\\.19\\.0/);
+  assert.match(jenkinsfile, /mise exec node@20\.19\.0/);
   assert.match(jenkinsfile, /mise exec node@22/);
   assert.match(jenkinsfile, /mise exec node@24/);
   assert.match(jenkinsfile, /npm run quality:ci/);
   assert.match(jenkinsfile, /npm audit --audit-level=high/);
   assert.match(jenkinsfile, /PIPEX_GITHUB_INSTALL_SPEC/);
-  assert.match(jenkinsfile, /archiveArtifacts artifacts: '.artifacts\\/\\*\\.tgz,dist\\/\\*\\*'/);
-  assert.doesNotMatch(jenkinsfile, /docker compose|run-jenkins-job\\.sh/);
+  assert.match(jenkinsfile, /archiveArtifacts artifacts: '.artifacts\/\*\.tgz,dist\/\*\*'/);
+  assert.doesNotMatch(jenkinsfile, /docker compose|run-jenkins-job\.sh/);
   assert.doesNotMatch(jenkinsfile, /benchmark:large|npm publish/);
   assert.match(jenkinsDocs, /Multibranch Pipeline/);
   assert.match(jenkinsDocs, /shared host/);
