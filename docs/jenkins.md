@@ -1,88 +1,68 @@
 # Jenkins CI
 
-`Jenkinsfile` is the proposed authoritative Jenkins definition for PipeX. It is
-safe to use in a Multibranch Pipeline and does not publish packages or load
-release credentials. The existing GitHub Actions workflow remains enabled until
-the first Jenkins build for this revision is green; removing it before then
-would create an unverified CI transition.
+PipeX uses the repository-root `Jenkinsfile` for CI. The controller runs on
+`jenkins.cloud.snyxe.de`; the existing Jenkins Linux build agent executes
+tools through [mise](https://mise.jdx.dev/). No Docker daemon or Docker socket
+is required for this pipeline, and the pipeline does not publish packages.
 
-## Required Jenkins setup
+## Connect the repository
 
-Create a **Multibranch Pipeline** for `https://github.com/Snyxex/PipeX.git`
-with script path `Jenkinsfile`. Discover `main` and pull requests, and configure
-the GitHub webhook as the primary trigger for pushes and pull requests. Do not
-use periodic polling as the normal trigger.
+The repository is `Snyxex/PipeX` in the **personal Snyxex account**, not
+automatically part of the GitHub organization used for Devion.
 
-The required plugins are Pipeline, Git, and GitHub Branch Source. No Docker
-Pipeline or Credentials Binding plugin is required because the pipeline invokes
-the agent's Docker Compose v2 CLI and uses no credentials. Repository access may
-use a read-only checkout credential if the repository is made private; it must
-not be exposed to untrusted pull-request build steps. Configure branch discovery
-to exclude fork pull requests. The Jenkinsfile rejects a detected `CHANGE_FORK`
-as defense in depth before any container is started.
+1. Install the Jenkins GitHub App on the `Snyxex` account and grant access to
+   `PipeX`. Installing the app in another organization does not grant access
+   to this personal repository.
+2. In Jenkins, create a **Multibranch Pipeline** job named `PipeX`.
+3. Configure **GitHub** as Branch Source, owner `Snyxex`, repository `PipeX`,
+   and choose the appropriate GitHub App credential.
+4. Configure the Script Path as `Jenkinsfile`, discover `main` and only
+   trusted branches. **Do not enable pull-request builds on the shared host
+   agent.** The Jenkinsfile explicitly rejects change-request builds.
+5. Configure GitHub webhook delivery to
+   `https://jenkins.cloud.snyxe.de/github-webhook/` via the installed app.
+   Use webhook events, not frequent polling.
+6. Scan repository and run the `main` build. Confirm Jenkins posts its
+   build status to GitHub.
 
-The selected agent has label `docker-vps` and needs Bash, Git, Docker, Docker
-Compose v2, and permission to run Docker. Docker access is privileged: dedicate
-this agent to trusted builds where possible, restrict who can configure jobs,
-and keep the Docker daemon unavailable to unrelated workloads. The pipeline
-uses only official `node` images declared in `.ci/jenkins-compose.yml`.
+Jenkins requires Pipeline, Git, GitHub Branch Source, and artifact archiving
+support. The build agent requires Java 25 for remoting, Git, Bash, and
+`mise` in the systemd service PATH. The agent has the label `linux`.
 
-## Pipeline design
+## Pipeline gates
 
-After checkout, Jenkins prints only the commit SHA and branch. Each container
-prints its Node and npm versions after installing the declared `npm@11.16.0`.
-The quality matrix runs Node 20.19.0, 22, and 24 in parallel; every entry uses
-the same lockfile installation and separately reports typechecking, build, and
-each existing test suite. Node 24 also performs the blocking high/critical
-dependency audit in parallel.
+Sequential stages run with `mise exec node@...` for:
 
-Each entry has a separate Compose volume. `COMPOSE_PROJECT_NAME` incorporates
-the executor and build numbers, preventing concurrent Multibranch jobs sharing
-the Docker host from sharing containers, networks, or workspaces. The pipeline
-has a 30-minute global timeout, shorter GitHub-consumer and artifact timeouts,
-stops obsolete same-branch builds, and removes Compose resources and the
-workspace in `post { always }`.
+- Node.js 20.19.0, the declared compatibility minimum.
+- The current mise-resolved Node.js 22 release.
+- The current mise-resolved Node.js 24 release.
+- Blocking `npm audit --audit-level=high` on Node.js 24.
+- GitHub dependency consumer smoke test for the checked commit.
+- `npm pack` and archive of the tarball and compiled distribution.
 
-The pipeline neither interpolates branch names into shell commands nor accepts
-arbitrary Git references. The GitHub consumer job permits only the checked
-40-character commit SHA or `refs/pull/<number>/head`, passes that value as an
-environment variable, and invokes npm with argument arrays in Node.js. No
-secrets, release credentials, or privileged publishing steps are present, so
-untrusted pull requests cannot obtain them through this pipeline.
+Each quality stage runs `npm ci --ignore-scripts --no-audit --no-fund`
+followed by `npm run quality:ci`, which covers typecheck, build, tooling,
+unit, integration, security, package, consumer, and performance tests.
 
-## Package and consumer gates
+This intentionally prioritizes compatibility validation over parallelism on
+the shared VPS agent. There is a 45-minute build timeout, a 10-minute GitHub
+consumer timeout, no concurrent builds for the same branch, 20 retained builds,
+and up to 7 days of retained artifacts.
 
-The quality jobs explicitly require `dist/index.mjs` and `dist/index.d.mts`
-after the build. Existing package tests validate the complete npm dry-run
-payload and public exports; existing consumer tests install the generated tarball
-in a clean external project and verify both ESM runtime and NodeNext types.
+## Security and future improvements
 
-Jenkins additionally runs `test:consumer:github`. For branch builds it installs
-`github:Snyxex/PipeX#<checked-commit>`; for pull requests it installs
-`github:Snyxex/PipeX#refs/pull/<number>/head`. This validates the actual GitHub
-installation path, including the `prepare` build, against the code Jenkins is
-validating rather than the default branch. It imports only the public `pipex`
-entry point and checks `DataEngine`.
-
-After the Node 24 quality gate succeeds, Jenkins creates one `npm pack` tarball
-and archives that `.tgz` plus `dist/`, fingerprinted. It never archives
-`node_modules`, temporary consumers, credentials, or caches. A later release
-stage can consume the archived package only on an explicit `v*` tag, but no
-release or npm publishing behavior is implemented now.
-
-## GitHub Actions replacement matrix
-
-| GitHub Actions step | Jenkins replacement |
-| --- | --- |
-| Checkout | `Checkout` stage with `checkout scm` |
-| Node 20.19/22/24 matrix | Parallel quality stages backed by isolated Docker volumes |
-| npm 11.16 installation | Every relevant container verifies npm 11.16.0 |
-| `npm ci --ignore-scripts --no-audit --no-fund` | Every quality, audit, and GitHub-consumer container |
-| Typecheck, build, tooling, unit, integration, security, package, consumer, performance | Explicit commands in every quality matrix entry |
-| `npm audit --audit-level=high` | Blocking `Dependency audit` branch on Node 24 |
-| GitHub Actions concurrency and timeouts | Declarative Jenkins options and stage timeouts |
-
-The Jenkins pipeline adds an explicit Dist gate, artifact archive, and a remote
-GitHub-install consumer smoke test. Once a green Jenkins Multibranch build has
-been inspected, remove `.github/workflows/ci.yml` in a follow-up change and
-update this document to mark Jenkins as the sole CI system.
+- The shared host agent has no Docker socket. Do not add the agent account to
+  the host's `docker` group.
+- Only build trusted branches. Use a dedicated isolated/ephemeral agent if
+  untrusted pull requests must be tested.
+- GitHub App credentials are configured in Jenkins and must not be injected
+  into arbitrary build steps. The Jenkinsfile does not request credentials.
+- Project versions of Node.js 22 and 24 currently follow the latest minor
+  and patch releases within each major. Pin exact versions when strict
+  reproducibility is required, and consider a committed `mise.toml`.
+- The separate `.ci/jenkins-compose.yml` and
+  `.ci/run-jenkins-job.sh` remain from the previous Docker-based design and
+  are **not used** by the current Jenkinsfile.
+- Do not remove any existing alternative CI until the Jenkins Multibranch
+  job succeeds and its GitHub status checks are verified.
+- No npm publication or automatic release credentials are configured.
