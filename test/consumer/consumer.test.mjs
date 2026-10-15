@@ -83,7 +83,10 @@ test('packed tarball works in a clean runtime and TypeScript consumer', async ()
       '--pack-destination',
       root,
     ], repositoryRoot);
-    const [packed] = JSON.parse(packOutput);
+    // npm can emit lifecycle/build output before the JSON package manifest.
+    const jsonMatch = /^\[\s*\{/m.exec(packOutput);
+    assert.ok(jsonMatch, 'npm pack did not emit a JSON package manifest');
+    const [packed] = JSON.parse(packOutput.slice(jsonMatch.index));
     const tarball = join(root, packed.filename);
     const consumer = join(root, 'consumer');
     await mkdir(consumer);
