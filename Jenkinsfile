@@ -1,18 +1,18 @@
 pipeline {
-  agent { label 'docker-vps' }
+  agent { label 'linux' }
 
   options {
     timestamps()
     disableConcurrentBuilds(abortPrevious: true)
-    timeout(time: 30, unit: 'MINUTES')
+    timeout(time: 45, unit: 'MINUTES')
     skipDefaultCheckout(true)
+    buildDiscarder(logRotator(numToKeepStr: '20', artifactDaysToKeepStr: '7'))
   }
 
   environment {
-    COMPOSE_FILE = '.ci/jenkins-compose.yml'
-    // Build numbers are job-local; the executor number also separates concurrent
-    // multibranch jobs sharing the same Docker host.
-    COMPOSE_PROJECT_NAME = "pipex-ci-${EXECUTOR_NUMBER}-${BUILD_NUMBER}"
+    CI = 'true'
+    NPM_CONFIG_CACHE = "${WORKSPACE}/.npm"
+    MISE_YES = '1'
   }
 
   stages {
@@ -22,69 +22,98 @@ pipeline {
       }
     }
 
-    stage('Environment') {
+    stage('Trusted branch check') {
       steps {
         script {
-          if (env.CHANGE_FORK?.trim()) {
-            error('Fork pull requests do not run on the Docker-capable PipeX agent.')
+          if (env.CHANGE_ID?.trim() || env.CHANGE_FORK?.trim()) {
+            error('PipeX CI runs only for trusted branches on this shared host agent; pull requests require an isolated agent.')
           }
         }
         sh '''
           set -eu
-          printf 'Git commit: %s\\n' "$(git rev-parse HEAD)"
-          printf 'Branch: %s\\n' "${BRANCH_NAME:-$(git branch --show-current)}"
+          git rev-parse HEAD
+          mise --version
         '''
       }
     }
 
-    stage('CI gates') {
-      parallel {
-        stage('Quality / Node 20.19') {
-          steps {
-            sh 'bash .ci/run-jenkins-job.sh node20-ci quality'
-          }
-        }
+    stage('Quality / Node 20.19.0') {
+      steps {
+        sh '''
+          set -eu
+          mise exec node@20.19.0 -- bash -c '
+            set -eu
+            node --version
+            npm --version
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm run quality:ci
+          '
+        '''
+      }
+    }
 
-        stage('Quality / Node 22') {
-          steps {
-            sh 'bash .ci/run-jenkins-job.sh node22-ci quality'
-          }
-        }
+    stage('Quality / Node 22') {
+      steps {
+        sh '''
+          set -eu
+          mise exec node@22 -- bash -c '
+            set -eu
+            node --version
+            npm --version
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm run quality:ci
+          '
+        '''
+      }
+    }
 
-        stage('Quality / Node 24') {
-          steps {
-            sh 'bash .ci/run-jenkins-job.sh node24-ci quality'
-          }
-        }
+    stage('Quality / Node 24') {
+      steps {
+        sh '''
+          set -eu
+          mise exec node@24 -- bash -c '
+            set -eu
+            node --version
+            npm --version
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm run quality:ci
+          '
+        '''
+      }
+    }
 
-        stage('Dependency audit') {
-          steps {
-            sh 'bash .ci/run-jenkins-job.sh audit-ci audit'
-          }
-        }
+    stage('Dependency audit') {
+      steps {
+        sh 'mise exec node@24 -- npm audit --audit-level=high'
       }
     }
 
     stage('GitHub dependency consumer') {
       options {
-        timeout(time: 8, unit: 'MINUTES')
-      }
-      steps {
-        sh 'bash .ci/run-jenkins-job.sh github-consumer-ci github-consumer'
-      }
-    }
-
-    stage('Package artifacts') {
-      options {
-        timeout(time: 5, unit: 'MINUTES')
+        timeout(time: 10, unit: 'MINUTES')
       }
       steps {
         sh '''
-          set -euo pipefail
-          bash .ci/run-jenkins-job.sh node24-ci artifact
+          set -eu
+          REF="$(git rev-parse HEAD)"
+          case "$REF" in
+            *[!0-9a-f]*|'') echo "Invalid commit SHA" >&2; exit 2 ;;
+          esac
+          test "${#REF}" -eq 40
+          export PIPEX_GITHUB_INSTALL_SPEC="github:Snyxex/PipeX#$REF"
+          mise exec node@24 -- npm run test:consumer:github
+        '''
+      }
+    }
+
+    stage('Archive package') {
+      steps {
+        sh '''
+          set -eu
           mkdir -p .artifacts
-          docker compose -f "$COMPOSE_FILE" run --rm -T node24-ci \
-            tar -cf - -C /workspace .artifacts dist | tar -xf -
+          mise exec node@24 -- npm pack --ignore-scripts --pack-destination .artifacts
+          test -f dist/index.mjs
+          test -f dist/index.d.mts
         '''
         archiveArtifacts artifacts: '.artifacts/*.tgz,dist/**', fingerprint: true
       }
@@ -93,11 +122,6 @@ pipeline {
 
   post {
     always {
-      sh '''
-        if [ -f "$COMPOSE_FILE" ]; then
-          docker compose -f "$COMPOSE_FILE" down --volumes --remove-orphans || true
-        fi
-      '''
       deleteDir()
     }
   }
