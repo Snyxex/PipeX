@@ -1,5 +1,5 @@
 pipeline {
-  agent { label 'linux' }
+  agent { label 'linux && docker' }
 
   options {
     timestamps()
