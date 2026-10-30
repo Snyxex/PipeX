@@ -88,10 +88,10 @@ test('Discord webhook credentials stay outside the untrusted PR/branch Jenkinsfi
   const release = await read('Jenkinsfile.github-release-discord');
   const npm = await read('Jenkinsfile.npm-release-discord');
 
-  assert.match(ci, /PipeX-Discord-Notifier/);
+  assert.match(ci, /PIPEX_DISCORD_CI_JOB/);
   assert.match(ci, /wait: false/);
   assert.match(ci, /currentBuild\.currentResult/);
-  assert.doesNotMatch(ci, /withCredentials|DISCORD_WEBHOOK_URL/);
+  assert.doesNotMatch(ci, /withCredentials|DISCORD_WEBHOOK_URL|SOURCE_URL/);
   assert.match(notifier, /withCredentials/);
   assert.match(notifier, /pipex-discord-pr-ci/);
   assert.match(notifier, /pipex-discord-branch-ci/);
