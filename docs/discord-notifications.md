@@ -61,6 +61,34 @@ PR identification uses the PR number in the Jenkins status target URL
 Branch name is best effort, as GitHub commit statuses need not include a
 branch name.
 
+## End-to-end notification verification
+
+To test without creating a release, push a reviewed documentation-only commit
+to an existing development pull request. Jenkins should report both its
+pull-request status and branch status to the GitHub repository. The active
+n8n GitHub trigger must then receive `status` events and route them to the
+appropriate Discord webhook credentials.
+
+Check these four points in order:
+
+1. **Jenkins:** CI finished and reported `success`, `failure` or `error`
+   to GitHub. `pending` does not notify.
+2. **GitHub:** commit status contexts exactly match
+   `continuous-integration/jenkins/pr-head` and
+   `continuous-integration/jenkins/branch`.
+3. **n8n:** under **Executions** select the production run and inspect
+   `Verify and format GitHub events`, `Four Discord destinations`
+   and the final Discord node.
+4. **Discord:** confirm the message appeared in the appropriate channel.
+   The webhook credential selected on each Discord node determines the
+   destination; no bot or channel ID is necessary.
+
+If GitHub statuses are green but n8n has no matching production execution,
+check the GitHub Trigger's webhook delivery and app permissions. If n8n
+executes but no Discord node runs, inspect context filtering and the
+deduplication key. A green *simulated/pinned* n8n execution **does not**
+verify that a real Discord webhook was called.
+
 ## Delivery and security
 
 - The workflow ignores unrelated repositories, pending statuses and unknown
