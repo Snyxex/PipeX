@@ -4,7 +4,7 @@ Status (2026-10-30): **`main` CI verified; npm publication still gated**. Do not
 
 ## Verified on `main`
 
-Evidence: Jenkins successful `main` run for merge commit `36c988755a874f23e085568b999975673b30fb01` (PR #5), completed on 2026-10-30.
+Evidence: Jenkins completed a successful `main` CI build on 2026-10-30. After any Git-history rewrite, previous commit IDs and build links must not be used for release verification.
 
 - [x] Jenkins Linux agent and `mise` are functioning without a Docker socket.
 - [x] Typecheck, build and quality suites pass on Node.js **22.23.3, 24.22.0 and 26.12.0**.
