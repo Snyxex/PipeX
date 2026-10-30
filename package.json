@@ -26,7 +26,8 @@
     "typecheck:prod": "tsc -p tsconfig.prod.json --noEmit",
     "build": "tsdown --minify",
     "prepare": "npm run build",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm test",
+    "release:preflight": "node scripts/release-preflight.mjs"
   },
   "keywords": [
     "data",
