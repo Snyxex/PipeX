@@ -27,7 +27,7 @@ automatically part of the GitHub organization used for Devion.
 
 Jenkins requires Pipeline, Git, GitHub Branch Source, and artifact archiving
 support. The build agent requires Java 25 for remoting, Git, Bash, and
-`mise` in the systemd service PATH. The agent has the label `linux`.
+`mise` in the systemd service PATH. The agent must have the label `linux` (the Jenkinsfile deliberately does not require `docker`, because no Docker daemon or socket is used).
 
 ## Pipeline gates
 
