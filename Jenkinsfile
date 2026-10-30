@@ -47,8 +47,18 @@ pipeline {
       }
     }
 
+<<<<<<< HEAD
     stage('Prepare PR merge test') {
       when { changeRequest target: 'main' }
+=======
+    stage('Validate AI skills') {
+      steps {
+        sh 'mise exec node@24 -- node scripts/validate-ai-skills.mjs'
+      }
+    }
+
+    stage('Quality / Node 20.19.0') {
+>>>>>>> origin/main
       steps {
         sh '''
           set -eu
