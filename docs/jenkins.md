@@ -70,8 +70,6 @@ and up to 7 days of retained artifacts.
 - Project versions of Node.js 22, 24, and 26 currently follow the latest minor
   and patch releases within each major. Pin exact versions when strict
   reproducibility is required, and consider a committed `mise.toml`.
-- The separate `.ci/jenkins-compose.yml` and
-  `.ci/run-jenkins-job.sh` remain from the previous Docker-based design and
-  are **not used** by the current Jenkinsfile.
+- The former Docker-based `.ci` helpers were removed after the new Jenkins pipeline passed its `main` build.
 - Jenkins Multibranch checks passed on `main` at commit `36c988755a874f23e085568b999975673b30fb01`. Recheck the exact release commit before publication.
 - No npm publication or automatic release credentials are configured.
