@@ -19,7 +19,7 @@ Use unmodified URLs of the form `https://discord.com/api/webhooks/<id>/<token>`,
 
 Also create a separate, randomly generated Jenkins **Secret text** credential `pipex-github-release-trigger-token` for the GitHub release webhook receiver. It is **not** a Discord webhook URL.
 
-## Job 1: trusted CI and npm notifier
+## Job 1: trusted PR and branch CI notifier
 
 Create a **standalone Pipeline** job under the Jenkins folder `snyxex` called exactly **`PipeX-Discord-Notifier`**, so that its full path is `/snyxex/PipeX-Discord-Notifier`. (The name must match the `build job:` call in the root Jenkinsfile.) Use **Pipeline script from SCM**, Git, the PipeX repository, branch **`main` only**, and Script Path **`Jenkinsfile.discord`**. Do not use Multibranch or a PR head for this job.
 
@@ -29,14 +29,15 @@ The ordinary `Jenkinsfile` will thereafter queue this job asynchronously for SUC
 
 **CI does not fail merely because the notifier job is missing or unavailable.** The notifier has its own failed build if Discord rejects delivery; monitor it separately. The normal CI pipeline does not call `withCredentials`.
 
-### npm publication
+## Job 2: protected npm release notifier
+
+Create another standalone **Pipeline-from-SCM** job under `snyxex` named exactly **`PipeX-Npm-Release-Discord`**, on `main` with Script Path **`Jenkinsfile.npm-release-discord`**. Restrict **Job/Build** permissions to release maintainers and the protected publishing job: ordinary PR/branch CI must **not** be allowed to trigger this job. Its initial build with an empty `RELEASE_VERSION` is a bootstrap and sends nothing.
 
 The repository's ordinary CI does **not** publish to npm. Once you have an approved **protected npm-publish job**, queue a notification only **after `npm publish` succeeds** and the exact package version has been confirmed. For example, from that trusted release job:
 
 ~~~groovy
-build job: '/snyxex/PipeX-Discord-Notifier',
+build job: '/snyxex/PipeX-Npm-Release-Discord',
   parameters: [
-    string(name: 'EVENT_TYPE', value: 'npm-release'),
     string(name: 'RELEASE_VERSION', value: env.RELEASE_VERSION)
   ],
   wait: false,
@@ -47,7 +48,7 @@ The notifier independently checks that `https://registry.npmjs.org/pipex/<versio
 
 A manually published npm package outside Jenkins is **not** automatically detected by this integration. To cover external publishers, add an approved registry event source or polling workflow with durable deduplication.
 
-## Job 2: GitHub published-release notifier
+## Job 3: GitHub published-release notifier
 
 This job sends the GitHub Release channel notification when a release is **published on GitHub**, independently of npm publication. It also covers releases published manually on the GitHub website.
 
@@ -64,7 +65,7 @@ This receiver uses a protected trigger token and validates against GitHub's publ
 
 ## Security and operating limits
 
-- A user with write access to a repository-controlled Jenkinsfile can change a PR pipeline. Thus **do not bind Discord secrets in the PR or branch job**. Both separate notifier jobs must fetch trusted `main` code and must not accept a dynamic SCM branch.
+- A user with write access to a repository-controlled Jenkinsfile can change a PR pipeline. Thus **do not bind Discord secrets in the PR or branch job**. All three separate notifier jobs must fetch trusted `main` code and must not accept a dynamic SCM branch.
 - The Discord sender uses `allowed_mentions: { parse: [] }` to disable mass mentions, restricts the outgoing webhook host to `discord.com`, and truncates event-supplied content. It never prints webhook URLs or HTTP response bodies.
 - GitHub releases require semver-style tags; npm versions must use the exact version without a `v` prefix.
 - **Delivery is best effort**: Discord can return HTTP errors or time out. The notifier fails visibly without altering CI status. Build/script syntax errors occurring before Jenkins can initialize the CI pipeline cannot trigger the pipeline's `post` section.
@@ -78,4 +79,4 @@ node --test test/tooling/discord-notifications.test.mjs
 npm run test:tooling
 ~~~
 
-The tests stub HTTP requests and must not send real Discord messages. The trusted notifier and GitHub receiver require Jenkins-side job creation and credentials before end-to-end verification.
+The tests stub HTTP requests and must not send real Discord messages. All three notification jobs require Jenkins-side job creation and credentials before end-to-end verification.
