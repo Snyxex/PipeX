@@ -114,6 +114,7 @@ pipeline {
           mise exec node@24 -- npm pack --ignore-scripts --pack-destination .artifacts
           test -f dist/index.mjs
           test -f dist/index.d.mts
+          mise exec node@24 -- npm exec -- node scripts/verify-packed-consumer.mjs
         '''
         archiveArtifacts artifacts: '.artifacts/*.tgz,dist/**', fingerprint: true
       }
