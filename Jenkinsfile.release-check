@@ -11,11 +11,6 @@ pipeline {
 
   // Use only as a manually invoked, permissioned Pipeline-from-SCM job
   // pinned to main. This Jenkinsfile never publishes or tags a release.
-  parameters {
-    string(name: 'PACKAGE_NAME', defaultValue: '@snyxex/pipex', description: 'Exact npm package identifier; must match package.json')
-    string(name: 'RELEASE_VERSION', defaultValue: '1.0.2', description: 'New version; must match package.json')
-  }
-
   environment {
     CI = 'true'
     MISE_YES = '1'
@@ -39,11 +34,29 @@ pipeline {
       }
     }
 
+    stage('Read release metadata from package.json') {
+      steps {
+        script {
+          def pkg = new groovy.json.JsonSlurperClassic().parseText(readFile('package.json'))
+          env.RELEASE_NAME = pkg.name
+          env.RELEASE_VERSION = pkg.version
+          if (!(env.RELEASE_NAME ==~ /^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/)) {
+            error('Invalid scoped npm package name in package.json')
+          }
+          if (!(env.RELEASE_VERSION ==~ /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/)) {
+            error('Invalid release version in package.json')
+          }
+          env.RELEASE_ARCHIVE = 'snyxex-pipex-' + env.RELEASE_VERSION + '.tgz'
+          echo "Release candidate: ${env.RELEASE_NAME}@${env.RELEASE_VERSION}"
+        }
+      }
+    }
+
     stage('Verify exact release target and registry') {
       steps {
         withEnv([
-          'RELEASE_EXPECTED_NAME=' + params.PACKAGE_NAME,
-          'RELEASE_EXPECTED_VERSION=' + params.RELEASE_VERSION
+          'RELEASE_EXPECTED_NAME=' + env.RELEASE_NAME,
+          'RELEASE_EXPECTED_VERSION=' + env.RELEASE_VERSION
         ]) {
           sh '''
             set -eu
@@ -95,7 +108,7 @@ pipeline {
           mise exec node@24 -- npm pack --ignore-scripts --pack-destination .artifacts
           set -- .artifacts/*.tgz
           test "$#" -eq 1
-          test "$(basename "$1")" = "snyxex-pipex-${RELEASE_VERSION}.tgz" || {
+          test "$(basename "$1")" = "${RELEASE_ARCHIVE}" || {
             echo 'Unexpected archive name for the requested release version.' >&2
             exit 2
           }
