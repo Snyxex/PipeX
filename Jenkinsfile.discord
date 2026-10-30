@@ -12,7 +12,7 @@ pipeline {
   // Create this as a standalone Pipeline-from-SCM job pinned to main.
   // Initial bootstrap invocation sends no notification.
   parameters {
-    choice(name: 'EVENT_TYPE', choices: ['bootstrap', 'ci', 'npm-release'], description: 'Notification type')
+    choice(name: 'EVENT_TYPE', choices: ['bootstrap', 'ci'], description: 'Notification type')
     choice(name: 'CI_TARGET', choices: ['branch', 'pr'], description: 'CI channel')
     choice(name: 'CI_RESULT', choices: ['SUCCESS', 'FAILURE', 'UNSTABLE'], description: 'CI result')
     string(name: 'SOURCE_REF', defaultValue: '', description: 'Branch or PR source name')
@@ -20,7 +20,6 @@ pipeline {
     string(name: 'SOURCE_URL', defaultValue: '', description: 'Original Jenkins build URL')
     string(name: 'SOURCE_BUILD_NUMBER', defaultValue: '', description: 'Original Jenkins build number')
     string(name: 'PR_NUMBER', defaultValue: '', description: 'PR number for CI events')
-    string(name: 'RELEASE_VERSION', defaultValue: '', description: 'Published npm version')
   }
 
   stages {
@@ -40,17 +39,12 @@ pipeline {
       when { expression { params.EVENT_TYPE != 'bootstrap' } }
       steps {
         script {
-          if (!(params.EVENT_TYPE in ['ci', 'npm-release'])) {
+          if (params.EVENT_TYPE != 'ci') {
             error('Unsupported notification type')
           }
-          def credentialsId
-          if (params.EVENT_TYPE == 'npm-release') {
-            credentialsId = 'pipex-discord-npm-release'
-          } else {
-            credentialsId = params.CI_TARGET == 'pr'
-              ? 'pipex-discord-pr-ci'
-              : 'pipex-discord-branch-ci'
-          }
+          def credentialsId = params.CI_TARGET == 'pr'
+            ? 'pipex-discord-pr-ci'
+            : 'pipex-discord-branch-ci'
           withEnv(['DISCORD_EVENT_KIND=' + params.EVENT_TYPE]) {
             withCredentials([string(credentialsId: credentialsId, variable: 'DISCORD_WEBHOOK_URL')]) {
               sh '''
