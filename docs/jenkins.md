@@ -34,8 +34,8 @@ support. The build agent requires Java 25 for remoting, Git, Bash, and
 
 Sequential stages run with `mise exec node@...` for:
 
-- Node.js 20.19.0, the declared compatibility minimum.
-- The current mise-resolved Node.js 22 release.
+- Node.js 26 (current release line).
+- The current mise-resolved Node.js 22 release (minimum supported major).
 - The current mise-resolved Node.js 24 release.
 - Blocking `npm audit --audit-level=high` on Node.js 24.
 - GitHub dependency consumer smoke test for the checked commit.
@@ -67,7 +67,7 @@ and up to 7 days of retained artifacts.
   additionally enable PR merge-ref discovery for this job.
 - GitHub App credentials are configured in Jenkins and must not be injected
   into arbitrary build steps. The Jenkinsfile does not request credentials.
-- Project versions of Node.js 22 and 24 currently follow the latest minor
+- Project versions of Node.js 22, 24, and 26 currently follow the latest minor
   and patch releases within each major. Pin exact versions when strict
   reproducibility is required, and consider a committed `mise.toml`.
 - The separate `.ci/jenkins-compose.yml` and
