@@ -23,21 +23,37 @@ by GitHub. Configure the relevant GitHub credential **privately** in n8n.
 
 ## Activate only after setup
 
-1. In Discord, create the four text channels. Obtain their **channel IDs** by
-   enabling Developer Mode; do not commit IDs or Discord credentials here.
-2. In n8n, create a **Discord Bot API** credential and give the bot permission
-   to post in those four channels. The workflow references a credential named
-   `PipeX Discord Bot` until an actual credential is selected.
-3. Replace the four placeholder channel IDs in the Discord nodes.
-4. Confirm the GitHub trigger uses a credential with access to
-   `Snyxex/PipeX` and events `release` and `status`; check repository
-   webhook delivery after publishing.
-5. Test with safe example events/pinned data, then activate the workflow.
-   Do not publish a real GitHub or npm release solely to test notifications.
-6. Jenkins must continue publishing GitHub commit statuses with the exact
-   contexts `continuous-integration/jenkins/pr-head` and
-   `continuous-integration/jenkins/branch`. Confirm the actual contexts
-   in the repository before turning on notifications.
+The four Discord channels already have incoming webhooks. No Discord bot
+or numeric channel IDs are needed. Each webhook targets a particular channel.
+
+1. Open the n8n workflow and one of the four `Discord · …` nodes.
+2. Select **Authentication: Webhook** and **Send a Message**.
+   The message expression `{{ $json.message }}` is preconfigured.
+3. Under **Credential for Discord Webhook**, create a new **Discord
+   Webhook** credential. Paste the existing webhook URL from the matching
+   Discord channel. Make one credential for each of the four channels.
+4. Save and test each destination with harmless sample messages before
+   publishing the workflow.
+5. Confirm the n8n GitHub trigger has permission to register `release`
+   and `status` webhooks in `Snyxex/PipeX`, and that its HTTPS endpoint
+   is externally reachable.
+6. Publish the workflow only after the credentials and routes work.
+7. Jenkins must publish the actual commit statuses using
+   `continuous-integration/jenkins/pr-head` and
+   `continuous-integration/jenkins/branch` contexts.
+
+### Credentials and destinations
+
+| n8n sender | Existing webhook URL to store in its Discord credential |
+| --- | --- |
+| `Discord · GitHub Releases` | Webhook for GitHub release announcements |
+| `Discord · npm Releases` | Webhook for npm releases |
+| `Discord · PR CI` | Webhook for PR build results |
+| `Discord · Branch CI` | Webhook for branch build results |
+
+Webhook URLs are secrets. They belong **only in Discord Webhook
+credentials in n8n**, not in public repository files, regular workflow
+fields, logs or chat messages.
 
 If Jenkins status contexts are renamed, update the n8n GitHub event-normalizer.
 PR identification uses the PR number in the Jenkins status target URL
@@ -56,11 +72,11 @@ branch name.
 - Event IDs are deduplicated across executions in n8n. Its finite stored
   history is **not** a guarantee of exactly-once delivery after retries,
   restoring backups or clearing workflow state.
-- All Discord bot credentials remain in n8n, not Jenkins, GitHub, or the
-  repository. Never paste a bot token or webhook secret into public files.
+- All Discord webhook URLs stay in n8n credentials, not Jenkins, GitHub, or the
+  repository. Do not paste webhook secrets into public files.
 - GitHub and npm endpoints may be temporarily unavailable. Inspect n8n
   execution errors if notifications are missing.
-- Keep this workflow unpublished until Discord credentials and channel IDs
+- Keep this workflow unpublished until the four Discord webhook credentials
   are configured and test delivery has been verified.
 
 The former `Jenkinsfile.discord`, `Jenkinsfile.github-release-discord`,
