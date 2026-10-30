@@ -1,0 +1,99 @@
+pipeline {
+  agent { label 'linux' }
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 45, unit: 'MINUTES')
+    skipDefaultCheckout(true)
+    buildDiscarder(logRotator(numToKeepStr: '15', artifactDaysToKeepStr: '30'))
+  }
+
+  // Use only as a manually invoked, permissioned Pipeline-from-SCM job
+  // pinned to main. This Jenkinsfile never publishes or tags a release.
+  parameters {
+    string(name: 'PACKAGE_NAME', defaultValue: '@snyxex/pipex', description: 'Exact npm package identifier; must match package.json')
+    string(name: 'RELEASE_VERSION', defaultValue: '1.0.2', description: 'New version; must match package.json')
+  }
+
+  environment {
+    CI = 'true'
+    MISE_YES = '1'
+    NPM_CONFIG_CACHE = '.npm'
+  }
+
+  stages {
+    stage('Verify trusted current main') {
+      steps {
+        checkout scm
+        sh '''
+          set -eu
+          git fetch --force origin +refs/heads/main:refs/remotes/origin/main
+          git fetch --tags --force origin
+          test "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/origin/main)" || {
+            echo 'Refusing release check outside the current main commit.' >&2
+            exit 2
+          }
+          git rev-parse HEAD
+        '''
+      }
+    }
+
+    stage('Verify exact release target and registry') {
+      steps {
+        withEnv([
+          'RELEASE_EXPECTED_NAME=' + params.PACKAGE_NAME,
+          'RELEASE_EXPECTED_VERSION=' + params.RELEASE_VERSION
+        ]) {
+          sh '''
+            set -eu
+            mise exec node@24 -- node scripts/release-preflight.mjs \
+              --name "$RELEASE_EXPECTED_NAME" \
+              --version "$RELEASE_EXPECTED_VERSION" \
+              --online
+          '''
+        }
+      }
+    }
+
+    stage('Install and verify package') {
+      steps {
+        sh '''
+          set -eu
+          mise exec node@24 -- bash -c '
+            set -eu
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm run quality:ci
+            npm audit --audit-level=high
+          '
+        '''
+      }
+    }
+
+    stage('Archive inspected candidate') {
+      steps {
+        sh '''
+          set -eu
+          mkdir -p .artifacts
+          mise exec node@24 -- npm pack --ignore-scripts --pack-destination .artifacts
+          set -- .artifacts/*.tgz
+          test "$#" -eq 1
+          sha256sum "$1" > .artifacts/sha256.txt
+          tar -tzf "$1" > .artifacts/contents.txt
+          echo 'Release candidate inspected and archived; no publication was performed.'
+        '''
+        archiveArtifacts artifacts: '.artifacts/*.tgz,.artifacts/sha256.txt,.artifacts/contents.txt', fingerprint: true
+      }
+    }
+  }
+
+  post {
+    cleanup {
+      script {
+        if (getContext(hudson.FilePath)) {
+          deleteDir()
+        }
+      }
+    }
+  }
+}
