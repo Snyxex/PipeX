@@ -90,6 +90,9 @@ test('every automated test belongs to an explicit suite', async () => {
   assert.match(releaseJenkinsfile, /release-preflight\.mjs/);
   assert.match(releaseJenkinsfile, /refs\/remotes\/origin\/main/);
   assert.match(releaseJenkinsfile, /archiveArtifacts/);
+  assert.match(releaseJenkinsfile, /verify-packed-consumer\.mjs/);
+  assert.match(releaseJenkinsfile, /sha256sum -c \.artifacts\/sha256\.txt/);
+  assert.match(releaseJenkinsfile, /snyxex-pipex-/);
   assert.doesNotMatch(releaseJenkinsfile, /withCredentials|npm publish|github\.com\/actions/);
   assert.match(jenkinsDocs, /Multibranch Pipeline/);
   assert.match(jenkinsDocs, /shared host/);

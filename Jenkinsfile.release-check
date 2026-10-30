@@ -95,6 +95,10 @@ pipeline {
           mise exec node@24 -- npm pack --ignore-scripts --pack-destination .artifacts
           set -- .artifacts/*.tgz
           test "$#" -eq 1
+          test "$(basename "$1")" = "snyxex-pipex-${RELEASE_VERSION}.tgz" || {
+            echo 'Unexpected archive name for the requested release version.' >&2
+            exit 2
+          }
           sha256sum "$1" > .artifacts/sha256.txt
           tar -tzf "$1" > .artifacts/contents.txt
           sha256sum -c .artifacts/sha256.txt
