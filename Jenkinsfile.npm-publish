@@ -76,7 +76,7 @@ pipeline {
             git fetch --unshallow origin
           fi
           git fetch --force --tags origin '+refs/heads/*:refs/remotes/origin/*'
-          gitleaks git --source . --redact --log-opts='--all' --exit-code 1
+          gitleaks git --redact --log-opts='--all' --exit-code 1
         '''
       }
     }
