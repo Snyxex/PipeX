@@ -1,6 +1,6 @@
 {
-  "name": "pipex",
-  "version": "1.0.1",
+  "name": "@snyxex/pipex",
+  "version": "1.0.2",
   "description": "PipeX — A lightweight, modular data transformation engine. Effortlessly chain compression, encryption, and hashing through a unified stream-based architecture.",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
@@ -26,7 +26,8 @@
     "typecheck:prod": "tsc -p tsconfig.prod.json --noEmit",
     "build": "tsdown --minify",
     "prepare": "npm run build",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm test",
+    "release:preflight": "node scripts/release-preflight.mjs"
   },
   "keywords": [
     "data",
@@ -64,8 +65,29 @@
       "import": "./dist/index.mjs"
     }
   },
-  "files": ["dist", "LICENSE", "README.md", "docs"],
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "docs/architecture.md",
+    "docs/encryption-v4-migration.md",
+    "docs/enterprise.md"
+  ],
   "allowScripts": {
     "msgpackr-extract@3.0.4": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Snyxex/PipeX.git"
+  },
+  "homepage": "https://github.com/Snyxex/PipeX#readme",
+  "bugs": {
+    "url": "https://github.com/Snyxex/PipeX/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

@@ -136,3 +136,20 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Additional sensitive local files (never commit real credentials)
+.env.*
+!.env.example
+!.env.sample
+.npmrc
+*.pem
+*.p12
+*.pfx
+*.key
+id_rsa
+id_ed25519
+*.sqlite
+*.sqlite3
+*.db
+.artifacts/
+.DS_Store

@@ -36,7 +36,7 @@ try {
   const result = execFileSync(process.execPath, [
     '--input-type=module',
     '--eval',
-    'const { DataEngine } = await import("pipex"); if (typeof DataEngine !== "function") process.exit(1);',
+    'const { DataEngine } = await import("@snyxex/pipex"; if (typeof DataEngine !== "function") process.exit(1);',
   ], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
   assert.equal(result, '');
 } finally {

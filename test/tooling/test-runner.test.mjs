@@ -72,6 +72,8 @@ test('every automated test belongs to an explicit suite', async () => {
   assert.match(jenkinsfile, /CHANGE_ID/);
   assert.match(jenkinsfile, /CHANGE_FORK/);
   assert.match(jenkinsfile, /Prepare PR merge test/);
+  assert.match(jenkinsfile, /Validate AI skills/);
+  assert.doesNotMatch(jenkinsfile, /^<{7}|^={7}|^>{7}/m);
   assert.match(jenkinsfile, /merge --no-commit --no-ff origin\/main/);
   assert.match(jenkinsfile, /getContext\(hudson\.FilePath\)/);
   assert.match(jenkinsfile, /mise exec node@26/);
@@ -84,6 +86,11 @@ test('every automated test belongs to an explicit suite', async () => {
   assert.match(jenkinsfile, /archiveArtifacts artifacts: '.artifacts\/\*\.tgz,dist\/\*\*'/);
   assert.doesNotMatch(jenkinsfile, /docker compose|run-jenkins-job\.sh/);
   assert.doesNotMatch(jenkinsfile, /benchmark:large|npm publish/);
+  const releaseJenkinsfile = await readFile(resolve('Jenkinsfile.release-check'), 'utf8');
+  assert.match(releaseJenkinsfile, /release-preflight\.mjs/);
+  assert.match(releaseJenkinsfile, /refs\/remotes\/origin\/main/);
+  assert.match(releaseJenkinsfile, /archiveArtifacts/);
+  assert.doesNotMatch(releaseJenkinsfile, /withCredentials|npm publish|github\.com\/actions/);
   assert.match(jenkinsDocs, /Multibranch Pipeline/);
   assert.match(jenkinsDocs, /shared host/);
   assert.doesNotMatch(manifest.scripts['quality:ci'], /benchmark/);

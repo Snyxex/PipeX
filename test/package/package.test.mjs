@@ -16,6 +16,9 @@ test('package metadata, lockfile root, and built export targets agree', async ()
   assert.equal(manifest.main, manifest.exports['.'].import);
   assert.equal(manifest.types, manifest.exports['.'].types);
   assert.equal(manifest.scripts.prepare, 'npm run build');
+  assert.equal(manifest.repository.url, 'git+https://github.com/Snyxex/PipeX.git');
+  assert.equal(manifest.bugs.url, 'https://github.com/Snyxex/PipeX/issues');
+  assert.deepEqual(manifest.files, ["dist","LICENSE","README.md","CHANGELOG.md","SECURITY.md","docs/architecture.md","docs/encryption-v4-migration.md","docs/enterprise.md"]);
   assert.ok(manifest.devDependencies.tsdown, 'Git installs need the build tool as a dev dependency');
   assert.ok(manifest.devDependencies.typescript, 'Git installs need TypeScript for declarations');
 
@@ -27,8 +30,8 @@ test('package metadata, lockfile root, and built export targets agree', async ()
     await access(new URL(`../../${conditions.types.slice(2)}`, import.meta.url));
   }
 
-  const root = await import('pipex');
-  const kms = await import('pipex/plugins/kms');
+  const root = await import('@snyxex/pipex');
+  const kms = await import('@snyxex/pipex/plugins/kms');
   assert.equal(typeof root.DataEngine, 'function');
   assert.equal(typeof root.getKmsProviderCapabilities, 'function');
   assert.equal(typeof root.KmsProviderAuthenticationError, 'function');
@@ -58,19 +61,17 @@ test('dry-run tarball contains only the public release payload', () => {
   const [pack] = JSON.parse(output.slice(jsonMatch.index));
   const actual = pack.files.map(file => file.path).sort();
   assert.deepEqual(actual, [
+    'CHANGELOG.md',
     'LICENSE',
     'README.md',
+    'SECURITY.md',
     'dist/index.d.mts',
     'dist/index.d.mts.map',
     'dist/index.mjs',
     'dist/index.mjs.map',
     'docs/architecture.md',
-    'docs/discord-notifications.md',
     'docs/encryption-v4-migration.md',
     'docs/enterprise.md',
-    'docs/jenkins.md',
-    'docs/npm-release-readiness.md',
-    'docs/security-audit-fixes.md',
     'package.json',
   ]);
 });
