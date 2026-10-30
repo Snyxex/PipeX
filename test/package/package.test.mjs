@@ -69,7 +69,9 @@ test('dry-run tarball contains only the public release payload', () => {
     'docs/enterprise.md',
     'docs/jenkins.md',
     'docs/npm-release-readiness.md',
+    'docs/releasing.md',
     'docs/security-audit-fixes.md',
+    'docs/security-history-review.md',
     'package.json',
   ]);
 });
