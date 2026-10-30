@@ -9,7 +9,7 @@ Use this skill when integrating PipeX into a Node.js application, designing tran
 ## Workflow
 1. Read the project's installed PipeX version and `README.md`, `src/index.ts`, and `src/core/dataEngine.ts` (or published declarations).
 2. Check the actual exported API and plugin registration before proposing code. Do not invent method names.
-3. Respect `engines.node >=20.19.0` for the current repository version; validate dependency engine requirements separately.
+3. Respect the declared `engines.node >=22` minimum for the current repository version; Jenkins targets Node.js 22, 24 and 26. Validate dependency engine requirements separately.
 4. Use `DataEngine` and exported plugin classes only according to their current signatures.
 5. Prefer minimal runnable ESM examples and include error handling where appropriate.
 6. Verify with `npm run typecheck`, `npm run build`, and relevant tests.
