@@ -66,10 +66,14 @@ test('every automated test belongs to an explicit suite', async () => {
   const jenkinsfile = await readFile(resolve('Jenkinsfile'), 'utf8');
   const jenkinsDocs = await readFile(resolve('docs/jenkins.md'), 'utf8');
   assert.match(jenkinsfile, /agent \{ label 'linux' \}/);
-  assert.match(jenkinsfile, /disableConcurrentBuilds\(abortPrevious: true\)/);
+  assert.match(jenkinsfile, /disableConcurrentBuilds\(\)/);
   assert.match(jenkinsfile, /skipDefaultCheckout\(true\)/);
   assert.match(jenkinsfile, /checkout scm/);
   assert.match(jenkinsfile, /CHANGE_ID/);
+  assert.match(jenkinsfile, /CHANGE_FORK/);
+  assert.match(jenkinsfile, /Prepare PR merge test/);
+  assert.match(jenkinsfile, /merge --no-commit --no-ff origin\/main/);
+  assert.match(jenkinsfile, /getContext\(hudson\.FilePath\)/);
   assert.match(jenkinsfile, /mise exec node@20\.19\.0/);
   assert.match(jenkinsfile, /mise exec node@22/);
   assert.match(jenkinsfile, /mise exec node@24/);
