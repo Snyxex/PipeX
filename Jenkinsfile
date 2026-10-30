@@ -61,11 +61,11 @@ pipeline {
       }
     }
 
-    stage('Quality / Node 20.19.0') {
+    stage('Quality / Node 26') {
       steps {
         sh '''
           set -eu
-          mise exec node@20.19.0 -- bash -c '
+          mise exec node@26 -- bash -c '
             set -eu
             node --version
             npm --version
