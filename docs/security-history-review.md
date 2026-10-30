@@ -4,7 +4,7 @@ Reviewed: **2026-10-30**, anchored to `main` commit `36c988755a874f23e085568b999
 
 ## Scope and result
 
-A targeted, read-only examination used GitHub's commit API to inspect the changed-line diffs in **115 commits reachable from `main`** (the 100 most recent results plus 15 older results). The current tracked-file inventory was also reviewed for sensitive-looking paths.
+A targeted, read-only examination used GitHub's commit API to inspect the changed-line diffs in **115 commits reachable from `main` **plus 6 additional unique commits** reachable from the other existing branch tips** (the 100 most recent results plus 15 older results, and unique commits on the other six pre-existing branches). The current tracked-file inventory was also reviewed for sensitive-looking paths.
 
 The checks looked for recognizable provider-token formats (including GitHub, npm, AWS, Google, OpenAI and GitLab), PEM private-key headers, database URLs containing inline passwords, obvious hard-coded credential assignments, and suspicious file names such as environment files, keys and certificates.
 

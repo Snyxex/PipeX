@@ -214,6 +214,7 @@ MIT © Snyxex
 ## Contributing and security
 
 - [Contributing guide](CONTRIBUTING.md)
+- [Support](SUPPORT.md)
 - [Security policy and responsible disclosure](SECURITY.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [Changelog](CHANGELOG.md)

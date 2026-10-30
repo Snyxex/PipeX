@@ -12,7 +12,7 @@ Evidence: Jenkins successful `main` run for merge commit `36c988755a874f23e08556
 - [x] AI-skill validation passes (24 skills and entrypoints).
 - [x] `npm audit --audit-level=high` reports 0 vulnerabilities at this commit.
 - [x] `npm pack` archives `pipex-1.0.1.tgz`; the test checks built ESM and type exports and the package allowlist.
-- [x] Repository commit-diff scan completed with no high-confidence token/key matches, subject to [documented limits](security-history-review.md).
+- [x] Targeted review of 115 `main`-reachable commit diffs and 6 further branch-only commit diffs completed with no high-confidence token/key matches, subject to [documented limits](security-history-review.md).
 
 ## Release gates still open
 

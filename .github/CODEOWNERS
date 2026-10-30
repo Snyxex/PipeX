@@ -1,0 +1,8 @@
+# Maintainer review ownership for project-wide and security-sensitive changes.
+* @Snyxex
+/Jenkinsfile @Snyxex
+/.github/ @Snyxex
+/package.json @Snyxex
+/src/core/secureFiles.ts @Snyxex
+/src/plugin/encryption.ts @Snyxex
+/src/plugin/kms_encryption.ts @Snyxex
