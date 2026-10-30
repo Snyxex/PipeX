@@ -1,82 +1,84 @@
-# PipeX: Jenkins -> Discord notifications
+# PipeX CI and release notifications via n8n
 
-PipeX routes **four types of events to four Discord channels**, using four distinct Discord webhooks. Discord notification credentials are **never available to the PR or branch CI pipeline**. Jenkins is the notification sender; no GitHub Actions or n8n are required.
+PipeX uses **Jenkins for CI** and **n8n for Discord notifications**. Jenkins
+does not store or use Discord credentials, and the public repository contains
+no internal n8n addresses, webhook URLs or Discord channel IDs.
 
-## Channels and credentials
+## Four Discord destinations
 
-Create four text channels in your Discord server (suggested names below). In each channel, go to **Edit Channel -> Integrations -> Webhooks -> New Webhook**, then copy the URL.
-
-Create **Secret text** credentials in Jenkins at **Manage Jenkins -> Credentials**, with IDs matching exactly:
-
-| Discord channel (example) | Jenkins Secret text ID | Message source |
+| Channel | Source | When |
 | --- | --- | --- |
-| `#github-releases` | `pipex-discord-github-release` | GitHub Release event with action `published` |
-| `#npm-releases` | `pipex-discord-npm-release` | Protected Jenkins npm-publish job, **after publication succeeds** |
-| `#pr-builds` | `pipex-discord-pr-ci` | Jenkins same-repository PR build: SUCCESS / FAILURE / UNSTABLE |
-| `#branch-builds` | `pipex-discord-branch-ci` | Jenkins branch build: SUCCESS / FAILURE / UNSTABLE |
+| GitHub releases | GitHub `release` event | Only `published`, never drafts/edits |
+| npm releases | Official npm registry | A new `@snyxex/pipex` latest version is observed |
+| Pull requests | GitHub `status` event created by Jenkins | Jenkins `pr-head` context reaches success/failure/error |
+| Branch builds | GitHub `status` event created by Jenkins | Jenkins `branch` context reaches success/failure/error |
 
-Use unmodified URLs of the form `https://discord.com/api/webhooks/<id>/<token>`, with **no query string**. Do **not** put webhook URLs in source control, PR descriptions, Jenkins build parameters, or command-line arguments. Treat a leaked webhook URL as compromised and regenerate it.
+The n8n workflow has an authenticated GitHub trigger for repository
+`Snyxex/PipeX`, an hourly npm polling trigger, a deduplication stage,
+four-way routing and one Discord send action per destination.
 
-Also create a separate, randomly generated Jenkins **Secret text** credential `pipex-github-release-trigger-token` for the GitHub release webhook receiver. It is **not** a Discord webhook URL.
+The source GitHub trigger requires permission to create/manage repository
+webhooks. The n8n instance must have a working HTTPS webhook URL reachable
+by GitHub. Configure the relevant GitHub credential **privately** in n8n.
 
-## Job 1: trusted PR and branch CI notifier
+## Activate only after setup
 
-Create a **standalone Pipeline-from-SCM** job in your private Jenkins installation using the PipeX repository, branch **`main` only**, and Script Path **`Jenkinsfile.discord`**. Do not use Multibranch or a PR head for this job. Set the non-secret environment variable **`PIPEX_DISCORD_CI_JOB`** in the CI job configuration to the full name of this trusted notifier job. Keep its full Jenkins folder path and controller hostname in private Jenkins settings, not the repository.
+The four Discord channels already have incoming webhooks. No Discord bot
+or numeric channel IDs are needed. Each webhook targets a particular channel.
 
-Restrict Job/Configure and Job/Build permissions; limit its SCM configuration and scripts to reviewed `main`. The job runs on the trusted `linux` agent using Node.js 24 via `mise`. Run it **once**, selecting the default `bootstrap` event: this checks out the trusted script and **sends nothing**.
+1. Open the n8n workflow and one of the four `Discord · …` nodes.
+2. Select **Authentication: Webhook** and **Send a Message**.
+   The message expression `{{ $json.message }}` is preconfigured.
+3. Under **Credential for Discord Webhook**, create a new **Discord
+   Webhook** credential. Paste the existing webhook URL from the matching
+   Discord channel. Make one credential for each of the four channels.
+4. Save and test each destination with harmless sample messages before
+   publishing the workflow.
+5. Confirm the n8n GitHub trigger has permission to register `release`
+   and `status` webhooks in `Snyxex/PipeX`, and that its HTTPS endpoint
+   is externally reachable.
+6. Publish the workflow only after the credentials and routes work.
+7. Jenkins must publish the actual commit statuses using
+   `continuous-integration/jenkins/pr-head` and
+   `continuous-integration/jenkins/branch` contexts.
 
-Once `PIPEX_DISCORD_CI_JOB` is configured, the ordinary `Jenkinsfile` queues this job asynchronously for SUCCESS, FAILURE, and UNSTABLE CI results. It sends `CI_TARGET=pr` for PR builds (based on `CHANGE_ID`) and `CI_TARGET=branch` for branch builds. It does not notify on ABORTED. The notifier reads the matching Discord credential and sends an embed containing the result, source ref and a **public GitHub PR/commit link**; it never exposes internal Jenkins build URLs.
+### Credentials and destinations
 
-**CI does not fail merely because the notifier job is missing or unavailable.** The notifier has its own failed build if Discord rejects delivery; monitor it separately. The normal CI pipeline does not call `withCredentials`.
+| n8n sender | Existing webhook URL to store in its Discord credential |
+| --- | --- |
+| `Discord · GitHub Releases` | Webhook for GitHub release announcements |
+| `Discord · npm Releases` | Webhook for npm releases |
+| `Discord · PR CI` | Webhook for PR build results |
+| `Discord · Branch CI` | Webhook for branch build results |
 
-## Job 2: protected npm release notifier
+Webhook URLs are secrets. They belong **only in Discord Webhook
+credentials in n8n**, not in public repository files, regular workflow
+fields, logs or chat messages.
 
-Create another standalone **Pipeline-from-SCM** job in your private Jenkins installation on `main` with Script Path **`Jenkinsfile.npm-release-discord`**. Set `PIPEX_DISCORD_NPM_JOB` to that job's full name **only inside the protected publisher's Jenkins configuration**, never in an untrusted PR build. Restrict **Job/Build** permissions to release maintainers and the protected publishing job: ordinary PR/branch CI must **not** be allowed to trigger this job. Its initial build with an empty `RELEASE_VERSION` is a bootstrap and sends nothing.
+If Jenkins status contexts are renamed, update the n8n GitHub event-normalizer.
+PR identification uses the PR number in the Jenkins status target URL
+(`PR-123`) when available; otherwise the message links to the commit.
+Branch name is best effort, as GitHub commit statuses need not include a
+branch name.
 
-The repository's ordinary CI does **not** publish to npm. Once you have an approved **protected npm-publish job**, queue a notification only **after `npm publish` succeeds** and the exact package version has been confirmed. For example, from that trusted release job:
+## Delivery and security
 
-~~~groovy
-build job: env.PIPEX_DISCORD_NPM_JOB,
-  parameters: [
-    string(name: 'RELEASE_VERSION', value: env.RELEASE_VERSION)
-  ],
-  wait: false,
-  propagate: false
-~~~
+- The workflow ignores unrelated repositories, pending statuses and unknown
+  CI contexts. Failure/error statuses are reported as failures.
+- The npm registry poll inspects the `latest` dist-tag. It cannot discover
+  versions published only under other dist-tags (for example `next`).
+  Existing versions may be announced on the workflow's first live execution;
+  seed/clear deduplication state deliberately to avoid that.
+- Event IDs are deduplicated across executions in n8n. Its finite stored
+  history is **not** a guarantee of exactly-once delivery after retries,
+  restoring backups or clearing workflow state.
+- All Discord webhook URLs stay in n8n credentials, not Jenkins, GitHub, or the
+  repository. Do not paste webhook secrets into public files.
+- GitHub and npm endpoints may be temporarily unavailable. Inspect n8n
+  execution errors if notifications are missing.
+- Keep this workflow unpublished until the four Discord webhook credentials
+  are configured and test delivery has been verified.
 
-The protected publisher must verify that `PIPEX_DISCORD_NPM_JOB` is configured before queueing the notification. The notifier independently checks that `https://registry.npmjs.org/pipex/<version>` reports the exact package and version. It is not proof of package ownership or release approval: verify `pipex` ownership before adding any publication credentials. Avoid running this from PRs or generic branch jobs.
-
-A manually published npm package outside Jenkins is **not** automatically detected by this integration. To cover external publishers, add an approved registry event source or polling workflow with durable deduplication.
-
-## Job 3: GitHub published-release notifier
-
-This job sends the GitHub Release channel notification when a release is **published on GitHub**, independently of npm publication. It also covers releases published manually on the GitHub website.
-
-1. Install the **Generic Webhook Trigger** plugin in Jenkins (use a current, patched version compatible with the controller).
-2. Create another **standalone Pipeline-from-SCM** job using an operator-chosen private Jenkins job name, pinned to the PipeX repository's **`main`** branch with Script Path **`Jenkinsfile.github-release-discord`**.
-3. Create a Jenkins Secret text credential `pipex-github-release-trigger-token`, holding a long random value. Its ID is referenced in the Jenkinsfile's `tokenCredentialId`.
-4. Run this Jenkins job once to install the webhook trigger configuration. Its first run (with no published release payload) **must not send a notification**.
-5. In GitHub, open **Snyxex/PipeX -> Settings -> Webhooks -> Add webhook**, configure the payload URL using your **privately configured** HTTPS Jenkins controller address plus `/generic-webhook-trigger/invoke?token=<the-random-trigger-token>`, Content type **application/json**, and subscribe to **Releases** events only. Use HTTPS. Treat the URL and token as sensitive.
-6. Test with a **new test release only if authorized**, or with an authenticated controlled webhook test in a safe environment. Do not create or publish a real release solely to test notifications without permission.
-
-The trigger extracts `$.action`, `$.repository.full_name`, `$.release.tag_name`, and `$.release.id` from the GitHub webhook. Only `published` events for `Snyxex/PipeX` run the sending stage. The notifier re-fetches the release from GitHub's API and verifies the release ID, tag, published state and release notes before forwarding. Drafts, edits and deletions are ignored.
-
-This receiver uses a protected trigger token and validates against GitHub's public API; it does **not** independently validate GitHub's `X-Hub-Signature-256` HMAC. Restrict webhook endpoint exposure and Jenkins permissions accordingly. A dedicated GitHub-signature-validating gateway is stronger when required.
-
-## Security and operating limits
-
-- A user with write access to a repository-controlled Jenkinsfile can change a PR pipeline. Thus **do not bind Discord secrets in the PR or branch job**. All three separate notifier jobs must fetch trusted `main` code and must not accept a dynamic SCM branch.
-- The Discord sender uses `allowed_mentions: { parse: [] }` to disable mass mentions, restricts the outgoing webhook host to `discord.com`, and truncates event-supplied content. It never prints webhook URLs or HTTP response bodies.
-- GitHub releases require semver-style tags; npm versions must use the exact version without a `v` prefix.
-- **Delivery is best effort**: Discord can return HTTP errors or time out. The notifier fails visibly without altering CI status. Build/script syntax errors occurring before Jenkins can initialize the CI pipeline cannot trigger the pipeline's `post` section.
-- Jenkins webhooks or manual release job reruns may deliver duplicate notifications. There is **no guaranteed exactly-once deduplication** in this first implementation. If exactly-once delivery is important, add a durable event-ID store and reconciliation.
-- Never grant PRs access to protected release credentials. Keep the npm and GitHub Release notifier jobs on a trusted agent with minimal credentials. Follow the [npm release readiness checklist](npm-release-readiness.md) and [enterprise security guidance](enterprise.md).
-
-## Local tests
-
-~~~bash
-node --test test/tooling/discord-notifications.test.mjs
-npm run test:tooling
-~~~
-
-The tests stub HTTP requests and must not send real Discord messages. All three notification jobs require Jenkins-side job creation and credentials before end-to-end verification.
+The former `Jenkinsfile.discord`, `Jenkinsfile.github-release-discord`,
+`Jenkinsfile.npm-release-discord`, and
+`scripts/notify-discord.mjs` are obsolete and removed.
