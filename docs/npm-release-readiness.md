@@ -1,47 +1,33 @@
 # npm release readiness (PipeX)
 
-Status: **blocked pending verified CI and package consumer checks**. Do not publish based on this checklist alone.
+Status (2026-10-30): **`main` CI verified; npm publication still gated**. Do not publish based on this checklist alone.
 
-## Release gates
+## Verified on `main`
 
-- [x] Align Jenkins agent label to `linux` (configuration only; build not yet verified).
-- [ ] Record the exact commit SHA and successful Jenkins Multibranch build for `main`.
-- [ ] Verify `quality:ci` on Node.js 20.19.0, current 22.x, and 24.x.
-- [ ] Resolve any engine incompatibilities in the dependency tree; do not assume a successful install implies support.
-- [ ] Run `npm audit --audit-level=high` and document any findings.
-- [ ] Run `npm pack --dry-run --json`; review the file list for secrets, test fixtures, and accidental source disclosure.
-- [ ] Build the tarball using `npm pack --ignore-scripts` after a clean build.
-- [ ] In an empty ESM consumer, install the exact tarball and verify `import { DataEngine } from 'pipex'`, `pipex/plugins/kms`, and TypeScript declarations.
-- [ ] Verify file-controller native bindings on each platform claimed as supported (at minimum Linux; Windows/macOS only if claimed).
-- [ ] Check npm package name availability/ownership and account 2FA or trusted publishing configuration.
-- [ ] Confirm license, README install instructions, version, changelog, and release notes.
-- [ ] Review active CI workflows and remove deprecated alternatives only after Jenkins checks are proven green.
-- [ ] Tag the verified commit and publish the **same** inspected tarball through an explicitly approved release step.
-- [ ] Install the published package in a clean consumer and confirm exports and types.
+Evidence: Jenkins successful `main` run for merge commit `36c988755a874f23e085568b999975673b30fb01` (PR #5), completed on 2026-10-30.
 
-## Suggested local verification
+- [x] Jenkins Linux agent and `mise` are functioning without a Docker socket.
+- [x] Typecheck, build and quality suites pass on Node.js **22.23.3, 24.22.0 and 26.12.0**.
+- [x] GitHub dependency and clean tarball consumer checks pass.
+- [x] AI-skill validation passes (24 skills and entrypoints).
+- [x] `npm audit --audit-level=high` reports 0 vulnerabilities at this commit.
+- [x] `npm pack` archives `pipex-1.0.1.tgz`; the test checks built ESM and type exports and the package allowlist.
+- [x] Repository commit-diff scan completed with no high-confidence token/key matches, subject to [documented limits](security-history-review.md).
 
-```sh
-npm ci --ignore-scripts
-npm run quality:ci
-npm audit --audit-level=high
-npm pack --dry-run --json
-mkdir -p .artifacts
-npm pack --ignore-scripts --pack-destination .artifacts
-```
+## Release gates still open
 
-Do not use `npm publish --ignore-scripts` as a shortcut for bypassing failed prepublish tests. Preserve the current `prepublishOnly` gate or replace it with an equivalent verified artifact-based release procedure.
+- [ ] Independently run full-history and all-refs secret scanning with a dedicated tool (for example `gitleaks`); review findings privately.
+- [ ] Confirm npm registry ownership/availability for `pipex` and the intended publishing identity.
+- [ ] Decide the *new* version and avoid collisions with npm releases or existing GitHub tags `v1.0.0` / `v1.0.1`.
+- [ ] Validate native bindings and file-system behavior on each OS **claimed** to be supported (Windows/macOS not verified by this Linux Jenkins run).
+- [ ] Review the supported minimum Node.js patch level against production dependencies and development/`prepare` requirements; testing current majors alone does not guarantee every older patch.
+- [ ] Enable/review GitHub secret scanning, push protection, private vulnerability reporting and branch protection where available.
+- [ ] Check license, README, changelog, contact/policy docs and release notes for the actual version.
+- [ ] Verify the release tarball digest and content immediately before the protected, explicitly approved publication step.
+- [ ] Publish only after approval; then install the published version in a fresh runtime and TypeScript consumer and verify exports/types.
 
-## Known observations (2026-10-30)
+## Execution and ownership
 
-- `package.json` declares `pipex@1.0.1`, ESM exports, `files` allowlist, and `prepublishOnly: npm test`.
-- `Jenkinsfile` archives a package but intentionally does not publish.
-- README still states npm publication has not occurred.
-- Lockfile contains development dependencies with Node engine requirements above the declared minimum; test actual Node 20.19.0 compatibility.
-- `./plugins/kms` currently points at the same bundle and declaration file as the root export; verify intended public API in a real consumer.
-- The Jenkinsfile previously requested `linux && docker` despite needing no Docker daemon; the agent selector and Jenkins documentation are now aligned to `linux`. Verify the real Jenkins agent has that label.
-- No live Jenkins execution, dependency audit, npm ownership check, or cross-platform smoke test has been completed by this document.
+Detailed release steps: [releasing.md](releasing.md). Responsible disclosure: [../SECURITY.md](../SECURITY.md). Git history review: [security-history-review.md](security-history-review.md).
 
-## Publication policy
-
-Keep npm credentials out of untrusted PR jobs. Prefer a dedicated, protected release job with explicit approval and minimal publishing permissions. Never commit npm tokens.
+This document records observed CI facts; it is not a guarantee of full supply-chain or cross-platform security. Jenkins never publishes to npm as part of normal CI.

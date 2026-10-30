@@ -4,12 +4,12 @@ PipeX is a typed Node.js data-transformation engine for composing compression, a
 
 ## Requirements
 
-- Node.js 20 or newer
+- Node.js 22 or newer (Jenkins tests current 22.x, 24.x and 26.x)
 - ESM (`"type": "module"`)
 
 ## Installation
 
-PipeX is not published to npm yet. Install it from the repository or consume a packed release artifact:
+npm registry publication and name ownership have not yet been independently verified. Install from the repository or use a reviewed, trusted release tarball:
 
 ```bash
 npm install github:Snyxex/PipeX
@@ -210,3 +210,13 @@ its 1 GiB default within the guarded 1 MiB to 8 GiB range.
 ## License
 
 MIT © Snyxex
+
+## Contributing and security
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy and responsible disclosure](SECURITY.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Changelog](CHANGELOG.md)
+- [Release preparation](docs/releasing.md)
+
+Use GitHub issues for ordinary bugs and features, **not** for undisclosed vulnerabilities. Jenkins is the project CI system; no GitHub Actions workflows are configured.

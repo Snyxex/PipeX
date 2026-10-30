@@ -73,6 +73,5 @@ and up to 7 days of retained artifacts.
 - The separate `.ci/jenkins-compose.yml` and
   `.ci/run-jenkins-job.sh` remain from the previous Docker-based design and
   are **not used** by the current Jenkinsfile.
-- Do not remove any existing alternative CI until the Jenkins Multibranch
-  job succeeds and its GitHub status checks are verified.
+- Jenkins Multibranch checks passed on `main` at commit `36c988755a874f23e085568b999975673b30fb01`. Recheck the exact release commit before publication.
 - No npm publication or automatic release credentials are configured.

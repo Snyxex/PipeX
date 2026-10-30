@@ -72,6 +72,8 @@ test('every automated test belongs to an explicit suite', async () => {
   assert.match(jenkinsfile, /CHANGE_ID/);
   assert.match(jenkinsfile, /CHANGE_FORK/);
   assert.match(jenkinsfile, /Prepare PR merge test/);
+  assert.match(jenkinsfile, /Validate AI skills/);
+  assert.doesNotMatch(jenkinsfile, /^<{7}|^={7}|^>{7}/m);
   assert.match(jenkinsfile, /merge --no-commit --no-ff origin\/main/);
   assert.match(jenkinsfile, /getContext\(hudson\.FilePath\)/);
   assert.match(jenkinsfile, /mise exec node@26/);
