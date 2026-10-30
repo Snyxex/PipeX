@@ -1,10 +1,10 @@
 # Repository history security review
 
-Reviewed: **2026-10-30**, anchored to `main` commit `36c988755a874f23e085568b999975673b30fb01`.
+Reviewed: **2026-10-30**, prior to any repository history rewrite. Historical commit IDs are intentionally omitted from the public report.
 
 ## Scope and result
 
-A targeted, read-only examination used GitHub's commit API to inspect the changed-line diffs in **115 commits reachable from `main` **plus 6 additional unique commits** reachable from the other existing branch tips** (the 100 most recent results plus 15 older results, and unique commits on the other six pre-existing branches). The current tracked-file inventory was also reviewed for sensitive-looking paths.
+A targeted, read-only examination used GitHub's commit API to inspect the changed-line diffs in **115 commits reachable from `main` plus 6 additional unique commits from other branch tips** (the 100 most recent results plus 15 older results, and unique commits on the other six pre-existing branches). The current tracked-file inventory was also reviewed for sensitive-looking paths.
 
 The checks looked for recognizable provider-token formats (including GitHub, npm, AWS, Google, OpenAI and GitLab), PEM private-key headers, database URLs containing inline passwords, obvious hard-coded credential assignments, and suspicious file names such as environment files, keys and certificates.
 
@@ -29,4 +29,4 @@ gitleaks git --source PipeX-audit.git --redact --exit-code 1
 
 Check the installed scanner version and command-line syntax first. Review findings privately and avoid copying suspected secrets into CI logs or public PRs. Verify that GitHub secret scanning, push protection and private vulnerability reporting are enabled when available.
 
-If a real secret is discovered, revoke/rotate it with the provider immediately, assess exposure and affected services, then consider history remediation with maintainer coordination. A normal deletion commit is insufficient to remove exposed historical content.
+If a real secret is discovered, revoke/rotate it with the provider immediately, assess exposure and affected services, then coordinate history remediation using an offline full clone and GitHub Support. A normal deletion commit is insufficient to remove exposed historical content.
