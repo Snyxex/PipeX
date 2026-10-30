@@ -1,14 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { test } from 'node:test';
 
-const textFiles = [
-  'README.md',
-  'docs/jenkins.md',
-  'docs/npm-release-readiness.md',
-  'Jenkinsfile',
-];
+const baselineTextFiles = ['README.md', 'AGENTS.md', 'CLAUDE.md'];
 const sensitivePaths = [
   /^\.env(?:\.|$)/i,
   /^\.npmrc$/,
@@ -27,9 +22,14 @@ test('tracked public files exclude local credentials and legacy infrastructure c
 });
 
 test('public CI documentation never embeds private Jenkins hosts or personal contact endpoints', async () => {
-  for (const path of textFiles) {
+  const docs = (await readdir(new URL('../../docs/', import.meta.url)))
+    .filter(name => name.endsWith('.md')).map(name => 'docs/' + name);
+  const pipelines = (await readdir(new URL('../../', import.meta.url)))
+    .filter(name => name.startsWith('Jenkinsfile'));
+  const paths = [...baselineTextFiles, ...docs, ...pipelines];
+  for (const path of paths) {
     const content = await readFile(new URL('../../' + path, import.meta.url), 'utf8');
-    assert.doesNotMatch(content, /https?:\/\/(?:[a-z0-9_.-]*jenkins[a-z0-9_.-]*)\.[a-z]{2,}/i,
+    assert.doesNotMatch(content, /https?:\/\/[a-z0-9.-]*jenkins[a-z0-9.-]*\.[a-z]{2,}/i,
       'An operator-specific Jenkins endpoint must not be in ' + path);
     assert.doesNotMatch(content, /\/home\/jenkins(?:-agent)?(?:\/|$)|[A-Z]:\\Users\\/i,
       'An internal agent path must not be in ' + path);
