@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -21,6 +21,10 @@ try {
     private: true,
     type: 'module',
   }, null, 2));
+  // Store executable ESM separately so `node --check` covers the consumer import.
+  // A missing parenthesis in an embedded --eval string previously broke this smoke test.
+  await copyFile(new URL('../test/consumer/fixtures/github-smoke.mjs', import.meta.url),
+    join(root, 'github-smoke.mjs'));
   execFileSync(process.execPath, [
     npmCli,
     'install',
@@ -33,11 +37,9 @@ try {
     resolve('.npm'),
     packageSpec,
   ], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
-  const result = execFileSync(process.execPath, [
-    '--input-type=module',
-    '--eval',
-    'const { DataEngine } = await import("@snyxex/pipex"; if (typeof DataEngine !== "function") process.exit(1);',
-  ], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+  const result = execFileSync(process.execPath, ['github-smoke.mjs'], {
+    cwd: root, encoding: 'utf8', stdio: 'pipe',
+  });
   assert.equal(result, '');
 } finally {
   await rm(root, { recursive: true, force: true });

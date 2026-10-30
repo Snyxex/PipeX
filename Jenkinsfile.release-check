@@ -97,7 +97,11 @@ pipeline {
           test "$#" -eq 1
           sha256sum "$1" > .artifacts/sha256.txt
           tar -tzf "$1" > .artifacts/contents.txt
-          echo 'Release candidate inspected and archived; no publication was performed.'
+          sha256sum -c .artifacts/sha256.txt
+          # Independently install the exact candidate tarball in a clean consumer.
+          # This is the same archive that will be offered for a protected release.
+          mise exec node@24 -- npm exec -- node scripts/verify-packed-consumer.mjs
+          echo 'Release candidate inspected, installed and archived; no publication was performed.'
         '''
         archiveArtifacts artifacts: '.artifacts/*.tgz,.artifacts/sha256.txt,.artifacts/contents.txt', fingerprint: true
       }

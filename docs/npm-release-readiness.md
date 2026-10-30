@@ -27,13 +27,17 @@ the final package name and version are chosen.
       and verify actual npm 2FA/trusted publishing/access.
       PR jobs must never receive these credentials.
 - [ ] **CI:** Pass Jenkins 22/24/26, audit, package, and
-      consumer checks at the final release SHA.
+      consumer checks at the final release SHA. A recent `main` status
+      reported a failure; the GitHub consumer smoke test contained an
+      invalid embedded import expression. The fix requires a fresh green
+      Jenkins run; do not infer that this was the sole CI failure.
 - [ ] **Security:** Complete a full all-refs history scan and
       investigate any matches privately. Verify security settings.
 - [ ] **Platforms:** Complete native-binding tests on Windows
       and macOS before claiming support there.
-- [ ] **Artifact:** Verify `npm pack --dry-run --json`, then
-      archive the **same** tarball, file list and SHA-256.
+- [ ] **Artifact:** Verify `npm pack --dry-run --json`, install the
+      **same archived tarball** in a clean consumer, archive its file list
+      and SHA-256, and inspect the protected release-check job result.
 - [ ] **Publication:** Obtain explicit maintainer approval,
       publish only from a protected job, and check that fresh
       consumers can install the exact package and version.
