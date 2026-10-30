@@ -69,7 +69,7 @@ This receiver uses a protected trigger token and validates against GitHub's publ
 - GitHub releases require semver-style tags; npm versions must use the exact version without a `v` prefix.
 - **Delivery is best effort**: Discord can return HTTP errors or time out. The notifier fails visibly without altering CI status. Build/script syntax errors occurring before Jenkins can initialize the CI pipeline cannot trigger the pipeline's `post` section.
 - Jenkins webhooks or manual release job reruns may deliver duplicate notifications. There is **no guaranteed exactly-once deduplication** in this first implementation. If exactly-once delivery is important, add a durable event-ID store and reconciliation.
-- Never grant PRs access to protected release credentials. Keep the npm and GitHub Release notifier jobs on a trusted agent with minimal credentials. Follow [release safety](releasing.md) and [security policy](../SECURITY.md) once those documents have landed.
+- Never grant PRs access to protected release credentials. Keep the npm and GitHub Release notifier jobs on a trusted agent with minimal credentials. Follow the [npm release readiness checklist](npm-release-readiness.md) and [enterprise security guidance](enterprise.md).
 
 ## Local tests
 
