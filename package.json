@@ -64,8 +64,25 @@
       "import": "./dist/index.mjs"
     }
   },
-  "files": ["dist", "LICENSE", "README.md", "docs"],
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "docs/architecture.md",
+    "docs/encryption-v4-migration.md",
+    "docs/enterprise.md"
+  ],
   "allowScripts": {
     "msgpackr-extract@3.0.4": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Snyxex/PipeX.git"
+  },
+  "homepage": "https://github.com/Snyxex/PipeX#readme",
+  "bugs": {
+    "url": "https://github.com/Snyxex/PipeX/issues"
   }
 }

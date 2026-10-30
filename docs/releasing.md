@@ -1,23 +1,79 @@
-# Release procedure
+# Publishing PipeX to npm
 
-PipeX CI runs on **Jenkins**. A green Jenkins build verifies code and packages; it does **not** publish to npm or approve a release.
+PipeX uses Jenkins for build verification. No normal CI or pull-request job
+has npm publication credentials. **The release operation must be deliberately
+approved by a maintainer.**
 
-## Before tagging
+## Critical: confirm the package name
 
-1. Select a reviewed `main` commit with passing Jenkins Node.js 22, 24 and 26 stages, AI-skill validation, dependency audit, package/consumer tests and archived tarball.
-2. Verify the intended package name `pipex` and ownership with the real npm registry and the publishing account. **This has not yet been independently confirmed.** If unavailable, choose an approved scoped name and update exports/docs accordingly.
-3. Review the release version and compare it with existing npm versions and GitHub tags. GitHub already has `v1.0.0` and `v1.0.1` releases; do not reuse an existing published version or retag a historical release.
-4. Confirm supported operating systems. Jenkins currently provides Linux coverage; native file operations need explicit Windows/macOS tests before claiming platform support.
-5. Run a dedicated full-history secret scan as described in [security-history-review.md](security-history-review.md), investigate findings and rotate any exposed credentials.
-6. Confirm [SECURITY.md](../SECURITY.md), [CONTRIBUTING.md](../CONTRIBUTING.md), license, README installation instructions and changelog reflect the release. Check required repository security settings.
-7. Inspect `npm pack --dry-run --json` for unintended files and check the final tarball against the public package allowlist.
+The npm **unscoped** name `pipex` is already listed under an unrelated
+publisher (historically `fritzprix`, version `0.0.6`).
+That name is **not available** for PipeX unless you independently prove
+that your npm account is an authorized maintainer. GitHub repo ownership
+does not grant ownership of an npm package.
 
-## Publication controls
+The recommended option is a new **scoped** name, such as
+`@snyxex/pipex`, **only if your actual npm account controls that scope**.
+Confirm this before renaming the package or publishing.
 
-- Never publish from a pull request, a shared untrusted executor, or an ordinary `main` build.
-- Only an explicitly approved, protected release operation may publish. Keep npm credentials in a restricted secrets store; use supported trusted publishing / 2FA where configured.
-- Publish **the exact reviewed artifact** (by path and digest), not a rebuild from a different commit. Check the npm account and registry destination before using `npm publish`.
-- No `npm publish`, tag creation, or GitHub Release mutation is automated by this repository.
-- After publication, verify the exact package and version from a fresh consumer install, imports/types, metadata, provenance where configured, and package contents.
+From your secure release machine:
 
-A successful `npm pack` proves an artifact can be created; it does not establish that the package name is available or that publication is authorized.
+```sh
+npm config get registry
+npm whoami --registry=https://registry.npmjs.org/
+npm view pipex name version maintainers --json --registry=https://registry.npmjs.org/
+npm view @snyxex/pipex versions --json --registry=https://registry.npmjs.org/
+npm access ls-packages
+```
+
+Treat npm `E404` as possible package absence, **not** proof you can
+publish to that scope. Do not paste authentication tokens or cookies into
+issues, logs or chat. Account 2FA/trusted-publishing policies and actual
+scope permissions must be checked on the npm account.
+
+If a scoped name is selected, change `package.json`,
+`package-lock.json`, consumer import specifiers, documentation and the
+GitHub install tests together; do not only rename the manifest. Keep
+`DataEngine` APIs stable. Do not reuse an existing published version.
+
+## Release gates
+
+1. Merge reviewed changes to `main` with green Jenkins tests on Node
+   22/24/26, audit, package tests, and clean ESM/TypeScript consumers.
+2. Run a full all-refs Git-history scan using a dedicated tool (for example
+   `gitleaks`). Read [security history review](security-history-review.md).
+   Investigate findings privately and rotate any actual exposed credentials.
+3. Confirm package name, publishing rights, registry, 2FA and a **new**
+   release version. GitHub already has tags `v1.0.0` and `v1.0.1`;
+   tag names must not be reused.
+4. Test native file bindings on each operating system claimed to be
+   supported. Jenkins currently covers Linux only.
+5. Verify release metadata, readme, license, changelog, security policy,
+   Node engine requirements and links.
+6. Inspect the exact `npm pack --json --ignore-scripts` output; ensure no
+   credentials, private CI files or test fixtures are included.
+7. Store the tarball's SHA-256, Git SHA, version and contents as protected
+   release evidence. Reconfirm that the intended tarball matches the
+   reviewed Git commit.
+8. Publish **only the inspected tarball** via a protected release
+   operation after explicit approval; do not use `npm publish` in PR CI.
+9. After publication, install the exact version from the public registry
+   in fresh ESM and TypeScript consumers; confirm export paths and digest.
+   Publish release notes and send Discord notifications only on confirmed
+   successful release events.
+
+A separate, manually invoked `Jenkinsfile.release-check` can validate
+and archive a candidate; it **cannot publish or tag releases**.
+
+## Why artifact publishing needs a separate test gate
+
+`package.json` currently uses `prepublishOnly: npm test`. That is a useful
+safeguard for publishing a working tree, but a tarball publish workflow
+must not assume lifecycle tests will rerun. Instead, execute the full
+quality/consumer/audit pipeline **before packing**, verify the archive,
+then publish exactly that inspected tarball through an approved, protected
+publisher.
+
+Never use `npm publish --ignore-scripts` to conceal a failed build.
+Do not commit npm tokens or give a shared/untrusted Jenkins worker
+access to release credentials.

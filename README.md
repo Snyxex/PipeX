@@ -9,7 +9,13 @@ PipeX is a typed Node.js data-transformation engine for composing compression, a
 
 ## Installation
 
-npm registry publication and name ownership have not yet been independently verified. Install from the repository or use a reviewed, trusted release tarball:
+**npm publication is not yet confirmed for this project.** The unscoped package
+name `pipex` is listed on npm under another publisher. Do not assume
+`npm install pipex` installs this repository; the final npm package name
+will be confirmed before release.
+
+Until then, install the current source from GitHub (the Git dependency
+build uses the `prepare` script):
 
 ```bash
 npm install github:Snyxex/PipeX
@@ -170,42 +176,28 @@ See [Architecture](./docs/architecture.md) and [Production operations](./docs/en
 
 ## Development
 
+Use Node.js 22 or newer with npm (Jenkins validates current Node.js 22, 24, and 26 releases).
+
 ```bash
-npm ci
+npm ci --ignore-scripts --no-audit --no-fund
 npm run quality:ci
-npm test
-npm run test:unit
-npm run test:integration
-npm run test:security
-npm run test:package
-npm run test:performance
-npm run build
-npm pack --dry-run
+npm audit --audit-level=high
+npm pack --dry-run --json --ignore-scripts
 ```
 
-`npm test` performs the production TypeScript check, build, test-runner checks,
-unit tests, integration tests, behavioral security regressions, and package
-sanity checks. `test:performance` is a short CI-safe smoke suite.
+`npm run quality:ci` executes the production typecheck, build, tooling, unit,
+integration, security, package, consumer, and short performance suites.
+Jenkins is the only configured CI system; the root `Jenkinsfile` tests PRs
+and branches and archives an npm tarball but does not publish it.
 
-`npm run quality:ci` is the local equivalent of the Jenkins quality job. It builds
-once, runs every automated suite (including the short performance/backpressure
-smoke tests), and validates the exact `npm pack --dry-run` payload. Jenkins runs this
-sequence on Node.js 20.19.0 plus the latest Node.js 22 and 24 releases. Node
-20.19.0 is the declared minimum; current releases are used for the other active
-major lines so security and compatibility fixes are exercised continuously.
-Jenkins installs with lifecycle scripts disabled, then invokes the trusted project
-build and checks explicitly for better per-suite diagnostics. GitHub Actions remains
-enabled until the first Jenkins Multibranch build is green, so the migration does not
-create a CI gap.
+For release planning see [Release procedure](docs/releasing.md) and
+[Release readiness](docs/npm-release-readiness.md). Perform a full secret scan,
+verify the npm publishing identity, and use a separately protected release job
+before distributing any tarball.
 
-The separate dependency-audit job checks runtime and development dependencies
-with `npm audit --audit-level=high`. High and critical advisories are blocking;
-moderate and low advisories remain visible in the report without failing CI.
-See [Jenkins CI](./docs/jenkins.md) for job and agent requirements.
-
-Large throughput work is intentionally excluded from `npm test` and CI. Run it
-manually with `npm run benchmark:large`; set `PIPEX_BENCHMARK_BYTES` to override
-its 1 GiB default within the guarded 1 MiB to 8 GiB range.
+Large throughput benchmarking is intentionally excluded from `npm test` and
+CI. Run it manually with `npm run benchmark:large` and
+`PIPEX_BENCHMARK_BYTES` as needed.
 
 ## License
 

@@ -8,6 +8,7 @@ Changes are documented here for users and downstream maintainers. Versioned rele
 - Release checks cover package tarballs, clean consumers, a dependency audit, and repository AI-skill validation.
 - Added open-source security, contribution, conduct, and release documentation.
 - Retired unused Docker-based CI scripts that still referenced Node.js 20.
+- Prepared a minimal consumer-facing npm tarball with release metadata and verified packaging tests.
 
 ## [1.0.1] - 2026-09-12
 

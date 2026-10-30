@@ -1,33 +1,60 @@
 # npm release readiness (PipeX)
 
-Status (2026-10-30): **`main` CI verified; npm publication still gated**. Do not publish based on this checklist alone.
+**Status: release candidate preparation in progress; publication BLOCKED.**
+This document separates evidence from prior CI runs from gates that must
+pass on the **actual** release commit.
 
-## Verified on `main`
+## Evidence from earlier verification
 
-Evidence: Jenkins completed a successful `main` CI build on 2026-10-30. After any Git-history rewrite, previous commit IDs and build links must not be used for release verification.
+- A Jenkins `main` run succeeded on 2026-10-30 with Node.js
+  22.23.3, 24.22.0 and 26.12.0, quality/consumer checks and the
+  dependency audit reporting no high-severity vulnerabilities **for
+  that earlier commit**.
+- The archive task produced a `pipex-1.0.1.tgz` artifact.
+- A limited commit-diff review found no high-confidence common
+  secret/token matches; see [review limitations](security-history-review.md).
 
-- [x] Jenkins Linux agent and `mise` are functioning without a Docker socket.
-- [x] Typecheck, build and quality suites pass on Node.js **22.23.3, 24.22.0 and 26.12.0**.
-- [x] GitHub dependency and clean tarball consumer checks pass.
-- [x] AI-skill validation passes (24 skills and entrypoints).
-- [x] `npm audit --audit-level=high` reports 0 vulnerabilities at this commit.
-- [x] `npm pack` archives `pipex-1.0.1.tgz`; the test checks built ESM and type exports and the package allowlist.
-- [x] Targeted review of 115 `main`-reachable commit diffs and 6 further branch-only commit diffs completed with no high-confidence token/key matches, subject to [documented limits](security-history-review.md).
+**These observations are not verification of the current `main`
+or a future release candidate.** Re-run all relevant gates after
+the final package name and version are chosen.
 
-## Release gates still open
+## Current blockers
 
-- [ ] Independently run full-history and all-refs secret scanning with a dedicated tool (for example `gitleaks`); review findings privately.
-- [ ] Confirm npm registry ownership/availability for `pipex` and the intended publishing identity.
-- [ ] Decide the *new* version and avoid collisions with npm releases or existing GitHub tags `v1.0.0` / `v1.0.1`.
-- [ ] Validate native bindings and file-system behavior on each OS **claimed** to be supported (Windows/macOS not verified by this Linux Jenkins run).
-- [ ] Review the supported minimum Node.js patch level against production dependencies and development/`prepare` requirements; testing current majors alone does not guarantee every older patch.
-- [ ] Enable/review GitHub secret scanning, push protection, private vulnerability reporting and branch protection where available.
-- [ ] Check license, README, changelog, contact/policy docs and release notes for the actual version.
-- [ ] Verify the release tarball digest and content immediately before the protected, explicitly approved publication step.
-- [ ] Publish only after approval; then install the published version in a fresh runtime and TypeScript consumer and verify exports/types.
+- [ ] **npm name ownership:** The unscoped name `pipex` has an
+      unrelated npm publisher. Confirm control of a new scope
+      (for example `@snyxex/pipex`) and migrate the manifest,
+      package lock, import paths and consumer tests before release.
+- [ ] **Release version:** Select a new version and confirm that
+      neither its npm version nor GitHub tag is already published.
+- [ ] **Credential controls:** Configure a protected publisher
+      and verify actual npm 2FA/trusted publishing/access.
+      PR jobs must never receive these credentials.
+- [ ] **CI:** Pass Jenkins 22/24/26, audit, package, and
+      consumer checks at the final release SHA.
+- [ ] **Security:** Complete a full all-refs history scan and
+      investigate any matches privately. Verify security settings.
+- [ ] **Platforms:** Complete native-binding tests on Windows
+      and macOS before claiming support there.
+- [ ] **Artifact:** Verify `npm pack --dry-run --json`, then
+      archive the **same** tarball, file list and SHA-256.
+- [ ] **Publication:** Obtain explicit maintainer approval,
+      publish only from a protected job, and check that fresh
+      consumers can install the exact package and version.
 
-## Execution and ownership
+## Procedure
 
-Detailed release steps: [releasing.md](releasing.md). Responsible disclosure: [../SECURITY.md](../SECURITY.md). Git history review: [security-history-review.md](security-history-review.md).
+See [the release runbook](releasing.md) and
+[SECURITY.md](../SECURITY.md). Jenkins is the sole CI system and
+normal builds do not publish packages.
 
-This document records observed CI facts; it is not a guarantee of full supply-chain or cross-platform security. Jenkins never publishes to npm as part of normal CI.
+To examine package contents locally after a successful build:
+
+```sh
+npm ci --ignore-scripts --no-audit --no-fund
+npm run quality:ci
+npm audit --audit-level=high
+npm pack --dry-run --json --ignore-scripts
+```
+
+Never infer npm package ownership from GitHub repository ownership or
+from an HTTP 404 alone.

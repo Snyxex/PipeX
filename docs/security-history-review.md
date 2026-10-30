@@ -30,3 +30,14 @@ gitleaks git --source PipeX-audit.git --redact --exit-code 1
 Check the installed scanner version and command-line syntax first. Review findings privately and avoid copying suspected secrets into CI logs or public PRs. Verify that GitHub secret scanning, push protection and private vulnerability reporting are enabled when available.
 
 If a real secret is discovered, revoke/rotate it with the provider immediately, assess exposure and affected services, then coordinate history remediation using an offline full clone and GitHub Support. A normal deletion commit is insufficient to remove exposed historical content.
+
+## Historical metadata and infrastructure
+
+A limited review also identified old CI-controller references in prior
+commits and an identifiable contributor email in historical Git metadata.
+These are **not confirmed credentials**. They were removed from the
+current tracked sources where applicable, but they remain accessible in
+older commits and some existing refs until a coordinated history rewrite.
+A deletion commit does not retroactively erase Git objects. Historical
+rewrites are disruptive and should only be undertaken with a clear
+privacy/security requirement and coordination with other clone owners.
