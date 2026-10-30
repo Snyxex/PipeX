@@ -62,8 +62,33 @@ GitHub install tests together; do not only rename the manifest. Keep
    Publish release notes and send Discord notifications only on confirmed
    successful release events.
 
-A separate, manually invoked `Jenkinsfile.release-check` can validate
-and archive a candidate; it **cannot publish or tag releases**.
+## Read-only Jenkins release candidate job
+
+Create a **separate**, permission-restricted Pipeline-from-SCM job
+pinned to `main` with Script Path `Jenkinsfile.release-check`.
+Only trusted release maintainers may invoke it. It never receives npm
+publication tokens and is not a GitHub Actions workflow.
+
+Supply `PACKAGE_NAME` and `RELEASE_VERSION` parameters matching
+`package.json`. The job verifies that the checked-out commit is exactly
+the latest `main`, checks existing tags and registry version collisions,
+runs quality and audit checks, and archives the candidate tarball with
+a SHA-256 digest and contents list. **It does not publish or tag anything.**
+
+Before using this job you must verify the real npm account's scope
+permissions. An HTTP 404 or a successful candidate build does not
+authorize publication.
+
+The preflight can also be run locally once the manifest has been
+migrated to a confirmed scoped package:
+
+```sh
+npm run release:preflight -- --name @snyxex/pipex --version 1.0.2 --online
+```
+
+The script intentionally refuses the current unscoped `pipex` manifest.
+This is a **release blocker by design**, not a failure of normal
+branch/PR CI.
 
 ## Why artifact publishing needs a separate test gate
 
