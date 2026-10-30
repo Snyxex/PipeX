@@ -30,8 +30,8 @@ test('package metadata, lockfile root, and built export targets agree', async ()
     await access(new URL(`../../${conditions.types.slice(2)}`, import.meta.url));
   }
 
-  const root = await import('pipex');
-  const kms = await import('pipex/plugins/kms');
+  const root = await import('@snyxex/pipex');
+  const kms = await import('@snyxex/pipex/plugins/kms');
   assert.equal(typeof root.DataEngine, 'function');
   assert.equal(typeof root.getKmsProviderCapabilities, 'function');
   assert.equal(typeof root.KmsProviderAuthenticationError, 'function');

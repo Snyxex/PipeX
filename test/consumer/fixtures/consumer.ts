@@ -4,8 +4,8 @@ import {
   ValidationPlugin,
   type EngineResult,
   type ProcessorPlugin,
-} from 'pipex';
-import { KmsEncryptionPlugin } from 'pipex/plugins/kms';
+} from '@snyxex/pipex';
+import { KmsEncryptionPlugin } from '@snyxex/pipex/plugins/kms';
 
 const engine = new DataEngine();
 const validationConstructor: typeof ValidationPlugin = Plugins.Validation;

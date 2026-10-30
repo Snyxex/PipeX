@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DataEngine, Plugins, ValidationPlugin } from 'pipex';
-import { KmsEncryptionPlugin } from 'pipex/plugins/kms';
+import { DataEngine, Plugins, ValidationPlugin } from '@snyxex/pipex';
+import { KmsEncryptionPlugin } from '@snyxex/pipex/plugins/kms';
 
 assert.equal(Plugins.Validation, ValidationPlugin);
 assert.equal(typeof KmsEncryptionPlugin, 'function');

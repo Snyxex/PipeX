@@ -1,6 +1,6 @@
 # PipeX AI agent skills
 
-These are repository-local, versioned instructions for coding assistants using PipeX. They are not executable and do not automatically become part of the npm package (`package.json` currently includes only `dist`, `LICENSE`, `README.md`, and `docs`).
+These are repository-local, versioned instructions for coding assistants using PipeX. They are not executable and do not automatically become part of the npm package (the npm tarball includes runtime output and selected public documentation, not repository-local skills).
 
 ## Skill catalog
 

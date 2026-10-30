@@ -128,8 +128,8 @@ test('Git dependency builds missing dist during prepare', async () => {
 
     await writeConsumer(consumer);
     installToolingAndPackage(consumer, `git+${pathToFileURL(source).href}`, { runScripts: true });
-    await assert.doesNotReject(() => readFile(join(consumer, 'node_modules/pipex/dist/index.mjs')));
-    await assert.doesNotReject(() => readFile(join(consumer, 'node_modules/pipex/dist/index.d.mts')));
+    await assert.doesNotReject(() => readFile(join(consumer, 'node_modules/@snyxex/pipex/dist/index.mjs')));
+    await assert.doesNotReject(() => readFile(join(consumer, 'node_modules/@snyxex/pipex/dist/index.d.mts')));
     verifyConsumer(consumer);
   } finally {
     await rm(root, { recursive: true, force: true });
