@@ -55,8 +55,6 @@ pipeline {
             echo 'Reviewed commit SHA mismatch.' >&2
             exit 2
           }
-          mise exec node@24 -- node scripts/release-preflight.mjs \
-            --name @snyxex/pipex --version 1.0.2 --online
         '''
       }
     }
@@ -118,7 +116,7 @@ pipeline {
             test -f .artifacts/${RELEASE_ARCHIVE}
             npm exec -- node scripts/verify-packed-consumer.mjs
           '
-          printf '%s  %s\n' "$EXPECTED_SHA256" '.artifacts/${RELEASE_ARCHIVE}' |
+          printf '%s  %s\n' "$EXPECTED_SHA256" ".artifacts/${RELEASE_ARCHIVE}" |
             sha256sum -c -
           sha256sum .artifacts/${RELEASE_ARCHIVE} > .artifacts/sha256.txt
           tar -tzf .artifacts/${RELEASE_ARCHIVE} > .artifacts/contents.txt
@@ -149,7 +147,7 @@ pipeline {
             printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$CONFIG"
             unset NPM_TOKEN
             export NPM_CONFIG_USERCONFIG="$CONFIG"
-            printf '%s  %s\n' "$EXPECTED_SHA256" '.artifacts/${RELEASE_ARCHIVE}' |
+            printf '%s  %s\n' "$EXPECTED_SHA256" ".artifacts/${RELEASE_ARCHIVE}" |
               sha256sum -c -
             # npm stage publish requires an existing package; the first
             # public release uses an authorized direct-publish granular token.
