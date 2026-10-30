@@ -85,6 +85,7 @@ test('Discord webhook credentials stay outside the untrusted PR/branch Jenkinsfi
   const ci = await read('Jenkinsfile');
   const notifier = await read('Jenkinsfile.discord');
   const release = await read('Jenkinsfile.github-release-discord');
+  const npm = await read('Jenkinsfile.npm-release-discord');
 
   assert.match(ci, /PipeX-Discord-Notifier/);
   assert.match(ci, /wait: false/);
@@ -93,7 +94,9 @@ test('Discord webhook credentials stay outside the untrusted PR/branch Jenkinsfi
   assert.match(notifier, /withCredentials/);
   assert.match(notifier, /pipex-discord-pr-ci/);
   assert.match(notifier, /pipex-discord-branch-ci/);
-  assert.match(notifier, /pipex-discord-npm-release/);
+  assert.doesNotMatch(notifier, /pipex-discord-npm-release/);
+  assert.match(npm, /pipex-discord-npm-release/);
+  assert.match(npm, /git merge-base --is-ancestor HEAD/);
   assert.match(notifier, /git merge-base --is-ancestor HEAD/);
   assert.match(release, /GenericTrigger/);
   assert.match(release, /pipex-discord-github-release/);
