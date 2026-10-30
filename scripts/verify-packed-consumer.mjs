@@ -9,7 +9,7 @@ assert.ok(npmCli, 'Run through npm so npm_execpath is available');
 const root = await mkdtemp(join(tmpdir(), 'pipex-packed-consumer-'));
 const artifacts = resolve('.artifacts');
 try {
-  const tarballs = (await readdir(artifacts)).filter(name => /^pipex-.*\.tgz$/.test(name));
+  const tarballs = (await readdir(artifacts)).filter(name => /^snyxex-pipex-.*\.tgz$/.test(name));
   assert.equal(tarballs.length, 1, 'Expected exactly one PipeX tarball in .artifacts');
   await writeFile(join(root, 'package.json'), JSON.stringify({
     name: 'pipex-packed-consumer', private: true, type: 'module'
@@ -17,7 +17,7 @@ try {
   execFileSync(process.execPath, [npmCli, 'install', '--ignore-scripts', '--no-audit',
     '--no-fund', '--package-lock=false', join(artifacts, tarballs[0])], { cwd: root, stdio: 'inherit' });
   execFileSync(process.execPath, ['--input-type=module', '--eval',
-    'import { DataEngine } from "pipex"; import { KmsEncryptionPlugin } from "pipex/plugins/kms"; if (typeof DataEngine !== "function" || typeof KmsEncryptionPlugin !== "function") process.exit(1);'
+    'import { DataEngine } from "@snyxex/pipex"; import { KmsEncryptionPlugin } from "@snyxex/pipex/plugins/kms"; if (typeof DataEngine !== "function" || typeof KmsEncryptionPlugin !== "function") process.exit(1);'
   ], { cwd: root, stdio: 'inherit' });
 } finally {
   await rm(root, { recursive: true, force: true });

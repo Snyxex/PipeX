@@ -9,23 +9,29 @@ PipeX is a typed Node.js data-transformation engine for composing compression, a
 
 ## Installation
 
-**npm publication is not yet confirmed for this project.** The unscoped package
-name `pipex` is listed on npm under another publisher. Do not assume
-`npm install pipex` installs this repository; the final npm package name
-will be confirmed before release.
+The npm package is being prepared as `@snyxex/pipex`; publication and
+scope ownership must be verified before installing it from the registry.
 
-Until then, install the current source from GitHub (the Git dependency
-build uses the `prepare` script):
+After publication:
+
+```bash
+npm install @snyxex/pipex
+```
+
+Until then, install the development version directly from this repository:
 
 ```bash
 npm install github:Snyxex/PipeX
 ```
 
+The older unscoped package `pipex` belongs to a different npm publisher.
+Do not install it expecting this project.
+
 ## Quick start
 
 ```ts
 import { randomBytes } from 'node:crypto';
-import { DataEngine, CompressionPlugin, EncryptionPlugin } from 'pipex';
+import { DataEngine, CompressionPlugin, EncryptionPlugin } from '@snyxex/pipex';
 
 const engine = new DataEngine({
   maxInputBytes: 64 * 1024 * 1024,
@@ -139,7 +145,7 @@ Register a custom plugin with `DataEngine.registerPlugin('redact', RedactPlugin)
 ## Custom plugins
 
 ```ts
-import { BasePlugin, type ProcessorContext } from 'pipex';
+import { BasePlugin, type ProcessorContext } from '@snyxex/pipex';
 
 class PrefixPlugin extends BasePlugin {
   readonly name = 'prefix';

@@ -10,7 +10,7 @@ pass on the **actual** release commit.
   22.23.3, 24.22.0 and 26.12.0, quality/consumer checks and the
   dependency audit reporting no high-severity vulnerabilities **for
   that earlier commit**.
-- The archive task produced a `pipex-1.0.1.tgz` artifact.
+- The previous archive task produced an unscoped `pipex-1.0.1.tgz` artifact. It is **not** the new scoped candidate.
 - A limited commit-diff review found no high-confidence common
   secret/token matches; see [review limitations](security-history-review.md).
 
@@ -20,12 +20,9 @@ the final package name and version are chosen.
 
 ## Current blockers
 
-- [ ] **npm name ownership:** The unscoped name `pipex` has an
-      unrelated npm publisher. Confirm control of a new scope
-      (for example `@snyxex/pipex`) and migrate the manifest,
-      package lock, import paths and consumer tests before release.
-- [ ] **Release version:** Select a new version and confirm that
-      neither its npm version nor GitHub tag is already published.
+- [x] **Scoped package migration:** Package metadata, lockfile and public imports use `@snyxex/pipex@1.0.2`.
+- [ ] **Publishing permissions:** Verify the npm account owns or is authorized to publish under the `@snyxex` scope.
+- [ ] **Release version:** Intended version is `1.0.2`; verify that neither the npm package version nor GitHub tag `v1.0.2` has been published.
 - [ ] **Credential controls:** Configure a protected publisher
       and verify actual npm 2FA/trusted publishing/access.
       PR jobs must never receive these credentials.

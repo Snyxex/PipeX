@@ -211,7 +211,7 @@ import {
   KmsProviderUnavailableError,
   getKmsProviderCapabilities,
   type KmsProvider,
-} from 'pipex';
+} from '@snyxex/pipex';
 
 const kms: KmsProvider = createKmsProvider();
 console.log(getKmsProviderCapabilities(kms));

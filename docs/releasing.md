@@ -12,9 +12,7 @@ That name is **not available** for PipeX unless you independently prove
 that your npm account is an authorized maintainer. GitHub repo ownership
 does not grant ownership of an npm package.
 
-The recommended option is a new **scoped** name, such as
-`@snyxex/pipex`, **only if your actual npm account controls that scope**.
-Confirm this before renaming the package or publishing.
+The selected package name is **`@snyxex/pipex`**, with an intended first scoped release of **`1.0.2`**. Verify the actual npm account controls the `@snyxex` scope before publication. The package metadata, lockfile, imports, and consumer tests have been updated.
 
 From your secure release machine:
 
@@ -31,10 +29,7 @@ publish to that scope. Do not paste authentication tokens or cookies into
 issues, logs or chat. Account 2FA/trusted-publishing policies and actual
 scope permissions must be checked on the npm account.
 
-If a scoped name is selected, change `package.json`,
-`package-lock.json`, consumer import specifiers, documentation and the
-GitHub install tests together; do not only rename the manifest. Keep
-`DataEngine` APIs stable. Do not reuse an existing published version.
+The package name and consumer import paths are now scoped. Check the npm account permissions and version availability; a successful HTTP check alone does not grant publishing rights. Keep `DataEngine` APIs stable and do not reuse an already published version.
 
 ## Release gates
 
@@ -95,9 +90,7 @@ migrated to a confirmed scoped package:
 npm run release:preflight -- --name @snyxex/pipex --version 1.0.2 --online
 ```
 
-The script intentionally refuses the current unscoped `pipex` manifest.
-This is a **release blocker by design**, not a failure of normal
-branch/PR CI.
+The preflight now checks the selected scoped package, the matching release version, and the official registry; a successful check does not by itself establish ownership or approval.
 
 ## Why artifact publishing needs a separate test gate
 

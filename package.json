@@ -1,6 +1,6 @@
 {
-  "name": "pipex",
-  "version": "1.0.1",
+  "name": "@snyxex/pipex",
+  "version": "1.0.2",
   "description": "PipeX — A lightweight, modular data transformation engine. Effortlessly chain compression, encryption, and hashing through a unified stream-based architecture.",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
@@ -85,5 +85,9 @@
   "homepage": "https://github.com/Snyxex/PipeX#readme",
   "bugs": {
     "url": "https://github.com/Snyxex/PipeX/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }
