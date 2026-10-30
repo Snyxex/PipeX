@@ -65,6 +65,7 @@ test('dry-run tarball contains only the public release payload', () => {
     'dist/index.mjs',
     'dist/index.mjs.map',
     'docs/architecture.md',
+    'docs/discord-notifications.md',
     'docs/encryption-v4-migration.md',
     'docs/enterprise.md',
     'docs/jenkins.md',
