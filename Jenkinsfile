@@ -3,7 +3,7 @@ pipeline {
 
   options {
     timestamps()
-    disableConcurrentBuilds(abortPrevious: true)
+    disableConcurrentBuilds()
     timeout(time: 45, unit: 'MINUTES')
     skipDefaultCheckout(true)
     buildDiscarder(logRotator(numToKeepStr: '20', artifactDaysToKeepStr: '7'))
@@ -147,8 +147,14 @@ pipeline {
   }
 
   post {
-    always {
-      deleteDir()
+    cleanup {
+      script {
+        if (getContext(hudson.FilePath)) {
+          deleteDir()
+        } else {
+          echo 'Skipping workspace cleanup: no workspace context available.'
+        }
+      }
     }
   }
 }
