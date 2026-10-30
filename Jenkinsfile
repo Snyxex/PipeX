@@ -22,17 +22,41 @@ pipeline {
       }
     }
 
-    stage('Trusted branch check') {
+    stage('Validate build source') {
       steps {
         script {
-          if (env.CHANGE_ID?.trim() || env.CHANGE_FORK?.trim()) {
-            error('PipeX CI runs only for trusted branches on this shared host agent; pull requests require an isolated agent.')
+          if (env.CHANGE_ID?.trim()) {
+            // Only PRs originating in this repository are eligible on the shared agent.
+            // Forks must use an isolated runner. Jenkinsfile changes still require review.
+            if (env.CHANGE_FORK?.trim()) {
+              error('Fork pull requests are not allowed on the shared Jenkins agent.')
+            }
+            if (env.CHANGE_TARGET != 'main') {
+              error('Only pull requests targeting main are allowed on this agent.')
+            }
+            if (!env.CHANGE_BRANCH?.trim()) {
+              error('Cannot verify pull request source branch; refusing shared-agent build.')
+            }
           }
         }
         sh '''
           set -eu
           git rev-parse HEAD
           mise --version
+        '''
+      }
+    }
+
+    stage('Prepare PR merge test') {
+      when { changeRequest target: 'main' }
+      steps {
+        sh '''
+          set -eu
+          # Jenkins checks out the PR head. Test the prospective merge with main,
+          # while keeping HEAD at the PR commit for the GitHub status context.
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git -c user.name='PipeX CI' -c user.email='ci@localhost' merge --no-commit --no-ff origin/main
+          echo 'PR working tree now contains the proposed merge with main.'
         '''
       }
     }
@@ -89,6 +113,7 @@ pipeline {
     }
 
     stage('GitHub dependency consumer') {
+      when { not { changeRequest() } }
       options {
         timeout(time: 10, unit: 'MINUTES')
       }
