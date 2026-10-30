@@ -7,14 +7,15 @@ const webhook = 'https://discord.com/api/webhooks/1234567890/test_token_ABC';
 const sha = 'a'.repeat(40);
 
 test('PR and branch notifications are distinct and do not mention users', () => {
-  const base = { CI_RESULT: 'SUCCESS', SOURCE_REF: 'feature/updates', SOURCE_SHA: sha, SOURCE_URL: 'https://jenkins.cloud.snyxe.de/job/pipex/5/', SOURCE_BUILD_NUMBER: '5' };
+  const base = { CI_RESULT: 'SUCCESS', SOURCE_REF: 'feature/updates', SOURCE_SHA: sha, SOURCE_BUILD_NUMBER: '5' };
   const pr = buildCiPayload({ ...base, CI_TARGET: 'pr', PR_NUMBER: '8' });
   const branch = buildCiPayload({ ...base, CI_TARGET: 'branch' });
   assert.match(pr.embeds[0].title, /PR #8/);
   assert.match(branch.embeds[0].title, /Branch feature\/updates/);
   assert.equal(pr.embeds[0].color, 0x2ecc71);
   assert.deepEqual(pr.allowed_mentions, { parse: [] });
-  assert.equal(pr.embeds[0].url, base.SOURCE_URL);
+  assert.equal(pr.embeds[0].url, 'https://github.com/Snyxex/PipeX/pull/8');
+  assert.equal(branch.embeds[0].url, 'https://github.com/Snyxex/PipeX/commit/' + sha);
 });
 
 test('failed and unstable CI builds are visually differentiated, aborted excluded', () => {
@@ -26,7 +27,7 @@ test('failed and unstable CI builds are visually differentiated, aborted exclude
 
 test('PR identifiers and Jenkins links are validated', () => {
   assert.throws(() => buildCiPayload({ CI_TARGET: 'pr', CI_RESULT: 'SUCCESS', PR_NUMBER: '8;rm -rf /' }));
-  const result = buildCiPayload({ CI_TARGET: 'branch', CI_RESULT: 'SUCCESS', SOURCE_REF: '@everyone', SOURCE_URL: 'https://example.org/not-jenkins' });
+  const result = buildCiPayload({ CI_TARGET: 'branch', CI_RESULT: 'SUCCESS', SOURCE_REF: '@everyone', SOURCE_SHA: 'not-a-real-sha' });
   assert.equal(result.embeds[0].url, undefined);
   assert.deepEqual(result.allowed_mentions, { parse: [] });
 });
