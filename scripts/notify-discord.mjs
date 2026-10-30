@@ -10,14 +10,12 @@ function field(value, max = 100) {
   return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
 }
 
-function safeJenkinsUrl(value) {
-  try {
-    const url = new URL(String(value ?? ''));
-    if (url.protocol !== 'https:' || url.hostname !== 'jenkins.cloud.snyxe.de' || url.username || url.password) return undefined;
-    return url.href.slice(0, 500);
-  } catch {
-    return undefined;
+function publicBuildLink(target, prNumber, sha) {
+  if (target === 'pr') return 'https://github.com/Snyxex/PipeX/pull/' + prNumber;
+  if (/^[a-f0-9]{40}$/i.test(String(sha ?? ''))) {
+    return 'https://github.com/Snyxex/PipeX/commit/' + sha;
   }
+  return undefined;
 }
 
 function safeTag(value) {
@@ -51,7 +49,7 @@ export function buildCiPayload(env) {
   if (!Object.hasOwn(COLORS, result)) throw new Error('Unknown CI result');
 
   const ref = field(env.SOURCE_REF, 100) || 'unknown';
-  const runUrl = safeJenkinsUrl(env.SOURCE_URL);
+  // Do not expose Jenkins controller URLs or internal infrastructure in Discord.
   const buildNo = field(env.SOURCE_BUILD_NUMBER, 16);
   const sha = safeSha(env.SOURCE_SHA);
   const prNumber = field(env.PR_NUMBER, 16);
@@ -59,6 +57,7 @@ export function buildCiPayload(env) {
 
   const subject = target === 'pr' ? 'PR #' + prNumber : 'Branch ' + ref;
   const title = (result === 'SUCCESS' ? 'PASSED' : result) + ' · ' + subject;
+  const publicUrl = publicBuildLink(target, prNumber, env.SOURCE_SHA);
   const info = [
     { name: 'Result', value: result, inline: true },
     { name: 'Source', value: ref, inline: true },
@@ -71,7 +70,7 @@ export function buildCiPayload(env) {
       title: field(title, 250),
       description: 'PipeX ' + (target === 'pr' ? 'pull request' : 'branch') + ' build completed.',
       color: COLORS[result],
-      ...(runUrl ? { url: runUrl } : {}),
+      ...(publicUrl ? { url: publicUrl } : {}),
       fields: info,
       footer: { text: 'PipeX · Jenkins CI' },
     }],
