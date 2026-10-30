@@ -41,8 +41,9 @@ timeout. Up to 20 builds and 7 days of archived artifacts are retained.
 
 - Treat all code from contributors as untrusted until reviewed. Fork PRs are
   rejected on the shared host; use an isolated runner to test external PRs.
-- Even same-repository PR code must not receive publication or Discord webhook
-  credentials. Keep them in independently permissioned, `main`-pinned jobs.
+- Even same-repository PR code must not receive publication credentials.
+  Notifications are sent by an independent n8n workflow using GitHub status
+  events, not by injecting Discord tokens into Jenkins.
 - Do not give the build account access to host container sockets or privileged
   infrastructure APIs.
 - Branch builds test their head; PR builds first test a prospective merge with
