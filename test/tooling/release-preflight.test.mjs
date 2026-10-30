@@ -11,6 +11,7 @@ const manifest = {
   repository: { url: 'git+https://github.com/Snyxex/PipeX.git' },
   bugs: { url: 'https://github.com/Snyxex/PipeX/issues' },
   files: ['dist', 'LICENSE', 'README.md', 'SECURITY.md', 'CHANGELOG.md', 'docs/architecture.md'],
+  publishConfig: { access: 'public', registry: 'https://registry.npmjs.org/' },
   scripts: { prepublishOnly: 'npm test' },
 };
 
@@ -52,4 +53,22 @@ test('registry identity mismatch and network failures reject a release check', a
   await assert.rejects(inspectRegistry('@snyxex/pipex', '1.0.2', async () => ({
     status: 503, ok: false,
   })), /HTTP 503/);
+});
+
+test('public npm publishing settings and registry are mandatory', () => {
+  const missing = checkReleaseSpec({ ...manifest, publishConfig: undefined }, '@snyxex/pipex', '1.0.2');
+  assert.ok(missing.some(error => error.includes('publishConfig.access')));
+  assert.ok(missing.some(error => error.includes('official npm registry')));
+
+  const privateAccess = checkReleaseSpec({
+    ...manifest,
+    publishConfig: { access: 'restricted', registry: 'https://registry.npmjs.org/' },
+  }, '@snyxex/pipex', '1.0.2');
+  assert.ok(privateAccess.some(error => error.includes('publishConfig.access')));
+
+  const wrongRegistry = checkReleaseSpec({
+    ...manifest,
+    publishConfig: { access: 'public', registry: 'https://example.invalid/' },
+  }, '@snyxex/pipex', '1.0.2');
+  assert.ok(wrongRegistry.some(error => error.includes('official npm registry')));
 });

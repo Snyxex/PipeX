@@ -38,8 +38,11 @@ export function checkReleaseSpec(manifest, expectedName, expectedVersion, tags =
   if ((manifest.files ?? []).some(path => path === 'docs' || path.startsWith('.ci') || path.startsWith('test/') || path.includes('jenkins'))) {
     errors.push('Public tarball allowlist contains internal CI or test content.');
   }
-  if (manifest.publishConfig?.registry && manifest.publishConfig.registry !== OFFICIAL_REGISTRY) {
-    errors.push('The configured publishing registry is not the official npm registry.');
+  if (manifest.publishConfig?.access !== 'public') {
+    errors.push('Scoped public package releases must set publishConfig.access to public.');
+  }
+  if (manifest.publishConfig?.registry !== OFFICIAL_REGISTRY) {
+    errors.push('The publishing registry must be the official npm registry.');
   }
   if (manifest.scripts?.prepublishOnly !== 'npm test') {
     errors.push('Source publish safeguard prepublishOnly must remain enabled.');
