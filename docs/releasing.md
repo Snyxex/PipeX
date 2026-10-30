@@ -127,7 +127,13 @@ a trusted maintainer machine with npm login, publishing rights to the
    release notes. n8n sends Discord notifications from those confirmed
    release events. Do not tag or publish automatically on branch/PR CI.
 
-Do not assume this project has configured Jenkins trusted publishing/OIDC.
+npm's [trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/)
+currently lists GitHub Actions, GitLab CI/CD and CircleCI cloud runners,
+but **not Jenkins**. Do not claim OIDC trusted publishing is supported by
+this Jenkins pipeline. Keep Jenkins as read-only CI and perform a
+human-authorized, interactive 2FA publication on a trusted workstation
+unless the publisher's supported provider list changes.
+
 The read-only release-check job intentionally has no npm credentials.
 
 ## Why artifact publishing needs a separate test gate
