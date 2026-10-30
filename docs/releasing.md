@@ -69,6 +69,15 @@ pinned to `main` with Script Path `Jenkinsfile.release-check`.
 Only trusted release maintainers may invoke it. It never receives npm
 publication tokens and is not a GitHub Actions workflow.
 
+Install a trusted, current `gitleaks` CLI on the release-check agent.
+The job fetches all advertised remote branches/tags and runs
+`gitleaks git --source . --redact --log-opts='--all'` before it archives
+any candidate. A failed or missing scanner **blocks the release check**.
+Handle any finding privately; CI logs must never contain actual token values.
+A normal clone cannot guarantee coverage of hidden PR refs, removed refs,
+forks or unreachable Git objects, so use a dedicated local mirror review
+for incident response and any broader historical cleanup.
+
 Supply `PACKAGE_NAME` and `RELEASE_VERSION` parameters matching
 `package.json`. The job verifies that the checked-out commit is exactly
 the latest `main`, checks existing tags and registry version collisions,
