@@ -4,6 +4,7 @@ Status: **blocked pending verified CI and package consumer checks**. Do not publ
 
 ## Release gates
 
+- [x] Align Jenkins agent label to `linux` (configuration only; build not yet verified).
 - [ ] Record the exact commit SHA and successful Jenkins Multibranch build for `main`.
 - [ ] Verify `quality:ci` on Node.js 20.19.0, current 22.x, and 24.x.
 - [ ] Resolve any engine incompatibilities in the dependency tree; do not assume a successful install implies support.
@@ -38,7 +39,7 @@ Do not use `npm publish --ignore-scripts` as a shortcut for bypassing failed pre
 - README still states npm publication has not occurred.
 - Lockfile contains development dependencies with Node engine requirements above the declared minimum; test actual Node 20.19.0 compatibility.
 - `./plugins/kms` currently points at the same bundle and declaration file as the root export; verify intended public API in a real consumer.
-- `docs/jenkins.md` says the Jenkins agent needs the `linux` label while the Jenkinsfile requests `linux && docker`. Align the label contract with the actual agent configuration; the pipeline does not use Docker.
+- The Jenkinsfile previously requested `linux && docker` despite needing no Docker daemon; the agent selector and Jenkins documentation are now aligned to `linux`. Verify the real Jenkins agent has that label.
 - No live Jenkins execution, dependency audit, npm ownership check, or cross-platform smoke test has been completed by this document.
 
 ## Publication policy
