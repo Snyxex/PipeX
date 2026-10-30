@@ -157,17 +157,17 @@ pipeline {
       script {
         // Never expose Discord secrets to PR/branch builds. This schedules
         // a separate trusted notifier job pinned to main.
-        if (['SUCCESS', 'FAILURE', 'UNSTABLE'].contains(currentBuild.currentResult)) {
+        def notifierJob = env.PIPEX_DISCORD_CI_JOB?.trim()
+        if (notifierJob && ['SUCCESS', 'FAILURE', 'UNSTABLE'].contains(currentBuild.currentResult)) {
           def isPr = env.CHANGE_ID?.trim()
           try {
-            build job: '/snyxex/PipeX-Discord-Notifier',
+            build job: notifierJob,
               parameters: [
                 string(name: 'EVENT_TYPE', value: 'ci'),
                 string(name: 'CI_TARGET', value: isPr ? 'pr' : 'branch'),
                 string(name: 'CI_RESULT', value: currentBuild.currentResult),
                 string(name: 'SOURCE_REF', value: isPr ? (env.CHANGE_BRANCH ?: '') : (env.BRANCH_NAME ?: '')),
                 string(name: 'SOURCE_SHA', value: env.GIT_COMMIT ?: ''),
-                string(name: 'SOURCE_URL', value: env.BUILD_URL ?: ''),
                 string(name: 'SOURCE_BUILD_NUMBER', value: env.BUILD_NUMBER ?: ''),
                 string(name: 'PR_NUMBER', value: env.CHANGE_ID ?: '')
               ],
