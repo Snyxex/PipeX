@@ -76,8 +76,9 @@ for incident response and any broader historical cleanup.
 Supply `PACKAGE_NAME` and `RELEASE_VERSION` parameters matching
 `package.json`. The job verifies that the checked-out commit is exactly
 the latest `main`, checks existing tags and registry version collisions,
-runs quality and audit checks, and archives the candidate tarball with
-a SHA-256 digest and contents list. **It does not publish or tag anything.**
+runs quality and audit checks, installs the candidate tarball in a clean
+ESM consumer, and archives the same tarball with its SHA-256 digest and
+contents list. **It does not publish or tag anything.**
 
 Before using this job you must verify the real npm account's scope
 permissions. An HTTP 404 or a successful candidate build does not
@@ -91,6 +92,49 @@ npm run release:preflight -- --name @snyxex/pipex --version 1.0.2 --online
 ```
 
 The preflight now checks the selected scoped package, the matching release version, and the official registry; a successful check does not by itself establish ownership or approval.
+
+## Final human-controlled publication (not automated by PR builds)
+
+Run these commands **only after an authorized release review** and only on
+a trusted maintainer machine with npm login, publishing rights to the
+`@snyxex` scope and the required account 2FA:
+
+1. Download the exact `snyxex-pipex-1.0.2.tgz`, `sha256.txt` and
+   `contents.txt` from the protected **successful** release-check job.
+   Verify that its Git commit matches the reviewed `main` release SHA.
+2. Keep the tarball inside `.artifacts/` and verify its archived digest:
+
+   ```sh
+   sha256sum -c .artifacts/sha256.txt
+   npm whoami --registry=https://registry.npmjs.org/
+   npm view @snyxex/pipex versions --json --registry=https://registry.npmjs.org/
+   ```
+
+   `npm view` may return 404 before the first release. This is expected
+   but **does not prove** permission to publish under the npm scope.
+3. After explicit final approval, publish the **verified tarball**, not a
+   working tree:
+
+   ```sh
+   npm publish .artifacts/snyxex-pipex-1.0.2.tgz --access public --registry=https://registry.npmjs.org/
+   ```
+
+   Complete any interactive 2FA prompt securely. Do not paste npm tokens,
+   OTPs, or recovery codes into shell history, Jenkins logs or chat.
+4. Inspect the published version and install it in a clean runtime and
+   TypeScript consumer. Only after verifying the registry release should
+   maintainers create the version tag and GitHub release with approved
+   release notes. n8n sends Discord notifications from those confirmed
+   release events. Do not tag or publish automatically on branch/PR CI.
+
+npm's [trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/)
+currently lists GitHub Actions, GitLab CI/CD and CircleCI cloud runners,
+but **not Jenkins**. Do not claim OIDC trusted publishing is supported by
+this Jenkins pipeline. Keep Jenkins as read-only CI and perform a
+human-authorized, interactive 2FA publication on a trusted workstation
+unless the publisher's supported provider list changes.
+
+The read-only release-check job intentionally has no npm credentials.
 
 ## Why artifact publishing needs a separate test gate
 

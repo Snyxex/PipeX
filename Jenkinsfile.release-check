@@ -95,9 +95,17 @@ pipeline {
           mise exec node@24 -- npm pack --ignore-scripts --pack-destination .artifacts
           set -- .artifacts/*.tgz
           test "$#" -eq 1
+          test "$(basename "$1")" = "snyxex-pipex-${RELEASE_VERSION}.tgz" || {
+            echo 'Unexpected archive name for the requested release version.' >&2
+            exit 2
+          }
           sha256sum "$1" > .artifacts/sha256.txt
           tar -tzf "$1" > .artifacts/contents.txt
-          echo 'Release candidate inspected and archived; no publication was performed.'
+          sha256sum -c .artifacts/sha256.txt
+          # Independently install the exact candidate tarball in a clean consumer.
+          # This is the same archive that will be offered for a protected release.
+          mise exec node@24 -- npm exec -- node scripts/verify-packed-consumer.mjs
+          echo 'Release candidate inspected, installed and archived; no publication was performed.'
         '''
         archiveArtifacts artifacts: '.artifacts/*.tgz,.artifacts/sha256.txt,.artifacts/contents.txt', fingerprint: true
       }
