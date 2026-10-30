@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFile } from 'node:fs/promises';
 import { buildCiPayload, loadGithubRelease, loadNpmRelease, notify, sendDiscord } from '../../scripts/notify-discord.mjs';
 
 const webhook = 'https://discord.com/api/webhooks/1234567890/test_token_ABC';
@@ -77,4 +78,25 @@ test('notification CLI selects its CI channel without accessing external release
 test('GitHub release notifier rejects unrelated webhook actions and repositories', async () => {
   await assert.rejects(notify({ DISCORD_EVENT_KIND: 'github-release', GH_ACTION: 'edited', GH_REPO: 'Snyxex/PipeX' }), /Not a published/);
   await assert.rejects(notify({ DISCORD_EVENT_KIND: 'github-release', GH_ACTION: 'published', GH_REPO: 'another/repo' }), /Not a published/);
+});
+
+test('Discord webhook credentials stay outside the untrusted PR/branch Jenkinsfile', async () => {
+  const read = async path => readFile(new URL('../../' + path, import.meta.url), 'utf8');
+  const ci = await read('Jenkinsfile');
+  const notifier = await read('Jenkinsfile.discord');
+  const release = await read('Jenkinsfile.github-release-discord');
+
+  assert.match(ci, /PipeX-Discord-Notifier/);
+  assert.match(ci, /wait: false/);
+  assert.match(ci, /currentBuild\.currentResult/);
+  assert.doesNotMatch(ci, /withCredentials|DISCORD_WEBHOOK_URL/);
+  assert.match(notifier, /withCredentials/);
+  assert.match(notifier, /pipex-discord-pr-ci/);
+  assert.match(notifier, /pipex-discord-branch-ci/);
+  assert.match(notifier, /pipex-discord-npm-release/);
+  assert.match(notifier, /git merge-base --is-ancestor HEAD/);
+  assert.match(release, /GenericTrigger/);
+  assert.match(release, /pipex-discord-github-release/);
+  assert.match(release, /tokenCredentialId: 'pipex-github-release-trigger-token'/);
+  assert.match(release, /git merge-base --is-ancestor HEAD/);
 });
