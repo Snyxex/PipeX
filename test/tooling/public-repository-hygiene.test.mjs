@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
 import { test } from 'node:test';
 
+const privateJenkinsUrl = /https?:\/\/(?!(?:[a-z0-9-]+\.)*jenkins\.io(?:[/:?#]|$))[a-z0-9.-]*jenkins[a-z0-9.-]*\.[a-z]{2,}/i;
+
 const baselineTextFiles = ['README.md', 'AGENTS.md', 'CLAUDE.md'];
 const sensitivePaths = [
   /^\.env(?:\.|$)/i,
@@ -21,6 +23,13 @@ test('tracked public files exclude local credentials and legacy infrastructure c
   }
 });
 
+test('official Jenkins documentation is allowed but operator endpoints are rejected', () => {
+  assert.doesNotMatch('https://www.jenkins.io/doc/pipeline/steps/credentials-binding/', privateJenkinsUrl);
+  assert.doesNotMatch('https://plugins.jenkins.io/', privateJenkinsUrl);
+  assert.match('https://jenkins.example.com/job/private', privateJenkinsUrl);
+  assert.match('https://jenkins.internal.example.org/', privateJenkinsUrl);
+});
+
 test('public CI documentation never embeds private Jenkins hosts or personal contact endpoints', async () => {
   const docs = (await readdir(new URL('../../docs/', import.meta.url)))
     .filter(name => name.endsWith('.md')).map(name => 'docs/' + name);
@@ -29,7 +38,7 @@ test('public CI documentation never embeds private Jenkins hosts or personal con
   const paths = [...baselineTextFiles, ...docs, ...pipelines];
   for (const path of paths) {
     const content = await readFile(new URL('../../' + path, import.meta.url), 'utf8');
-    assert.doesNotMatch(content, /https?:\/\/[a-z0-9.-]*jenkins[a-z0-9.-]*\.[a-z]{2,}/i,
+    assert.doesNotMatch(content, privateJenkinsUrl,
       'An operator-specific Jenkins endpoint must not be in ' + path);
     assert.doesNotMatch(content, /\/home\/jenkins(?:-agent)?(?:\/|$)|[A-Z]:\\Users\\/i,
       'An internal agent path must not be in ' + path);

@@ -23,9 +23,17 @@ the final package name and version are chosen.
 - [x] **Scoped package migration:** Package metadata, lockfile and public imports use `@snyxex/pipex@1.0.2`.
 - [ ] **Publishing permissions:** Verify the npm account owns or is authorized to publish under the `@snyxex` scope.
 - [ ] **Release version:** Intended version is `1.0.2`; verify that neither the npm package version nor GitHub tag `v1.0.2` has been published.
-- [ ] **Credential controls:** Configure a protected publisher
-      and verify actual npm 2FA/trusted publishing/access.
-      PR jobs must never receive these credentials.
+- [ ] **Credential controls:** Configure the *separate*, manually
+      approved `Jenkinsfile.npm-publish` job on a dedicated
+      `npm-release-isolated` agent. Store the granular npm token as an
+      item/folder-scoped Jenkins Secret text credential and verify
+      `@snyxex` publishing permission, short expiry and required
+      bypass-2FA setting. Never provide this token to PR builds.
+      See [token publishing](npm-token-publishing.md).
+- [ ] **First release:** `@snyxex/pipex` is not on npm yet. Verify that
+      `Read and write (publish and stage)` access is available; a
+      *stage-only* token cannot create this first npm package because
+      npm staging currently requires an existing published package.
 - [ ] **CI:** Pass Jenkins 22/24/26, audit, package, and
       consumer checks at the final release SHA. A recent `main` status
       reported a failure; the GitHub consumer smoke test contained an
