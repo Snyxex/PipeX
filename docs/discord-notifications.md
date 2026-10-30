@@ -28,7 +28,7 @@ or numeric channel IDs are needed. Each webhook targets a particular channel.
 
 1. Open the n8n workflow and one of the four `Discord · …` nodes.
 2. Select **Authentication: Webhook** and **Send a Message**.
-   The message expression `{{ $json.message }}` is preconfigured.
+   The message expression `{{ $json.content }}` and rich-embed fields (`title`, `description`, `color`, `link`) are preconfigured.
 3. Under **Credential for Discord Webhook**, create a new **Discord
    Webhook** credential. Paste the existing webhook URL from the matching
    Discord channel. Make one credential for each of the four channels.
@@ -60,6 +60,38 @@ PR identification uses the PR number in the Jenkins status target URL
 (`PR-123`) when available; otherwise the message links to the commit.
 Branch name is best effort, as GitHub commit statuses need not include a
 branch name.
+
+## Verify live GitHub → n8n → Discord delivery
+
+GitHub requires the n8n GitHub API credential to have **Webhooks:
+Read and write** permission on the selected `Snyxex/PipeX` repository.
+The GitHub trigger automatically creates an HTTPS repository webhook when
+the n8n workflow is published. GitHub repository settings → Webhooks must
+show an active webhook with both `release` and `status` subscribed.
+
+Test without publishing a real release:
+
+1. Submit a documentation-only commit on a dedicated test branch and open
+   a draft PR. Jenkins should report its PR and branch statuses to GitHub.
+2. Wait for a **completed** Jenkins status (success, failure or error);
+   pending statuses are intentionally ignored.
+3. In n8n → Executions, inspect a **production** run from the GitHub
+   trigger, not the hourly npm schedule or a pinned manual simulation.
+4. Inspect `Verify and format GitHub events`, `Four Discord
+   destinations` and the final Discord sender. Confirm the message
+   includes the real PR/branch, commit, result and public GitHub link.
+5. Confirm that the matching Discord channel received the message. The
+   n8n execution is successful only after its Discord node completes.
+
+If no GitHub-triggered execution arrives, check GitHub → Repository
+Settings → Webhooks → Recent Deliveries and the latest response status.
+Verify the GitHub token can access `GET /repos/Snyxex/PipeX/hooks`
+without HTTP 403. Never paste webhook URLs, tokens, or full response
+headers into issues or public logs.
+
+A green simulated n8n test does **not** establish that GitHub actually
+delivers status events. The npm polling trigger is independent of GitHub
+and does not verify the GitHub webhook.
 
 ## Delivery and security
 
