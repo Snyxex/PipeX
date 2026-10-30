@@ -37,6 +37,12 @@ pipeline {
       }
     }
 
+    stage('Validate AI skills') {
+      steps {
+        sh 'mise exec node@24 -- node scripts/validate-ai-skills.mjs'
+      }
+    }
+
     stage('Quality / Node 20.19.0') {
       steps {
         sh '''
