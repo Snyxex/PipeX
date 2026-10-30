@@ -17,7 +17,6 @@ pipeline {
     choice(name: 'CI_RESULT', choices: ['SUCCESS', 'FAILURE', 'UNSTABLE'], description: 'CI result')
     string(name: 'SOURCE_REF', defaultValue: '', description: 'Branch or PR source name')
     string(name: 'SOURCE_SHA', defaultValue: '', description: 'Original CI commit SHA')
-    string(name: 'SOURCE_URL', defaultValue: '', description: 'Original Jenkins build URL')
     string(name: 'SOURCE_BUILD_NUMBER', defaultValue: '', description: 'Original Jenkins build number')
     string(name: 'PR_NUMBER', defaultValue: '', description: 'PR number for CI events')
   }
