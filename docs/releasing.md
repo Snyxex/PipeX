@@ -136,6 +136,29 @@ unless the publisher's supported provider list changes.
 
 The read-only release-check job intentionally has no npm credentials.
 
+## Protected Jenkins token release (first scoped publish)
+
+A granular npm token can publish the first version after release approval.
+For the exact permissions, isolated Jenkins agent, folder-scoped
+credential and interactive release gates, see
+[npm token publishing](npm-token-publishing.md).
+
+**Important:** `npm stage publish` currently requires the npm package
+to already exist, so it cannot bootstrap `@snyxex/pipex@1.0.2` while
+the package is absent from the registry. A protected direct publish
+requires an authorized **publish-and-stage** granular token and the
+appropriate bypass-2FA setting. For later releases, prefer
+`npm stage publish` with a **stage-only** token and interactive
+maintainer approval.
+
+The protected `Jenkinsfile.npm-publish` job is intentionally separate
+from Jenkins multibranch PR CI and is not automatically configured or
+triggered. It requires a dedicated `npm-release-isolated` agent,
+`pipex-npm-publish-token` Jenkins Secret text credential restricted to
+that job/folder, the reviewed commit and exact SHA-256 of the
+`Jenkinsfile.release-check` artifact, and a second interactive
+approval. **Never give npm publishing credentials to PR builds.**
+
 ## Why artifact publishing needs a separate test gate
 
 `package.json` currently uses `prepublishOnly: npm test`. That is a useful
