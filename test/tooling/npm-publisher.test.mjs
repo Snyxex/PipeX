@@ -13,7 +13,7 @@ test('npm publishing is isolated, manually approved and absent from normal CI', 
   assert.match(publisher, /EXPECTED_COMMIT/);
   assert.match(publisher, /EXPECTED_SHA256/);
   assert.match(publisher, /release-preflight\.mjs/);
-  assert.match(publisher, /gitleaks git --source/);
+  assert.match(publisher, /gitleaks git --redact/);
   assert.match(publisher, /npm run quality:ci/);
   assert.match(publisher, /npm audit --audit-level=high/);
   assert.match(publisher, /verify-packed-consumer\.mjs/);
