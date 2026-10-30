@@ -16,9 +16,10 @@ automatically part of the GitHub organization used for Devion.
 2. In Jenkins, create a **Multibranch Pipeline** job named `PipeX`.
 3. Configure **GitHub** as Branch Source, owner `Snyxex`, repository `PipeX`,
    and choose the appropriate GitHub App credential.
-4. Configure the Script Path as `Jenkinsfile`, discover `main` and only
-   trusted branches. **Do not enable pull-request builds on the shared host
-   agent.** The Jenkinsfile explicitly rejects change-request builds.
+4. Configure the Script Path as `Jenkinsfile`, discover `main`, trusted branches, and same-repository pull requests targeting
+   `main`. Configure PR discovery to build PR heads (not merge refs): the
+   Jenkinsfile performs a no-commit merge with the latest `main` before tests.
+   Fork pull requests are rejected on the shared agent.
 5. Configure GitHub webhook delivery to
    `https://jenkins.cloud.snyxe.de/github-webhook/` via the installed app.
    Use webhook events, not frequent polling.
@@ -53,8 +54,17 @@ and up to 7 days of retained artifacts.
 
 - The shared host agent has no Docker socket. Do not add the agent account to
   the host's `docker` group.
-- Only build trusted branches. Use a dedicated isolated/ephemeral agent if
-  untrusted pull requests must be tested.
+- Branch builds test the branch head. Same-repository PR builds fetch `main`,
+  perform a no-commit merge, and run quality/audit/package tests against the
+  resulting working tree. A merge conflict fails the PR build. The GitHub
+  dependency consumer test is branch-only because its GitHub install targets
+  the actual head commit, not an uncommitted merge.
+- PR builds execute repository-controlled scripts on the shared agent. Treat
+  contributors with write access and Jenkinsfile changes as trusted, review
+  changes before execution, and keep secrets/host sockets inaccessible.
+  Fork PRs are rejected; use an isolated agent for untrusted contributions.
+- PR head checkout must be selected in Jenkins GitHub Branch Source. Do not
+  additionally enable PR merge-ref discovery for this job.
 - GitHub App credentials are configured in Jenkins and must not be injected
   into arbitrary build steps. The Jenkinsfile does not request credentials.
 - Project versions of Node.js 22 and 24 currently follow the latest minor
