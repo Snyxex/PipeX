@@ -41,7 +41,7 @@
   "license": "MIT",
   "packageManager": "npm@11.16.0",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
