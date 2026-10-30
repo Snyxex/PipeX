@@ -21,22 +21,22 @@ Also create a separate, randomly generated Jenkins **Secret text** credential `p
 
 ## Job 1: trusted PR and branch CI notifier
 
-Create a **standalone Pipeline** job under the Jenkins folder `snyxex` called exactly **`PipeX-Discord-Notifier`**, so that its full path is `/snyxex/PipeX-Discord-Notifier`. (The name must match the `build job:` call in the root Jenkinsfile.) Use **Pipeline script from SCM**, Git, the PipeX repository, branch **`main` only**, and Script Path **`Jenkinsfile.discord`**. Do not use Multibranch or a PR head for this job.
+Create a **standalone Pipeline-from-SCM** job in your private Jenkins installation using the PipeX repository, branch **`main` only**, and Script Path **`Jenkinsfile.discord`**. Do not use Multibranch or a PR head for this job. Set the non-secret environment variable **`PIPEX_DISCORD_CI_JOB`** in the CI job configuration to the full name of this trusted notifier job. Keep its full Jenkins folder path and controller hostname in private Jenkins settings, not the repository.
 
 Restrict Job/Configure and Job/Build permissions; limit its SCM configuration and scripts to reviewed `main`. The job runs on the trusted `linux` agent using Node.js 24 via `mise`. Run it **once**, selecting the default `bootstrap` event: this checks out the trusted script and **sends nothing**.
 
-The ordinary `Jenkinsfile` will thereafter queue this job asynchronously for SUCCESS, FAILURE, and UNSTABLE CI results. It sends `CI_TARGET=pr` for PR builds (based on `CHANGE_ID`) and `CI_TARGET=branch` for branch builds. It does not notify on ABORTED. The notifier reads the matching Discord credential and sends an embed containing the result, source ref, commit, and Jenkins build URL.
+Once `PIPEX_DISCORD_CI_JOB` is configured, the ordinary `Jenkinsfile` queues this job asynchronously for SUCCESS, FAILURE, and UNSTABLE CI results. It sends `CI_TARGET=pr` for PR builds (based on `CHANGE_ID`) and `CI_TARGET=branch` for branch builds. It does not notify on ABORTED. The notifier reads the matching Discord credential and sends an embed containing the result, source ref and a **public GitHub PR/commit link**; it never exposes internal Jenkins build URLs.
 
 **CI does not fail merely because the notifier job is missing or unavailable.** The notifier has its own failed build if Discord rejects delivery; monitor it separately. The normal CI pipeline does not call `withCredentials`.
 
 ## Job 2: protected npm release notifier
 
-Create another standalone **Pipeline-from-SCM** job under `snyxex` named exactly **`PipeX-Npm-Release-Discord`**, on `main` with Script Path **`Jenkinsfile.npm-release-discord`**. Restrict **Job/Build** permissions to release maintainers and the protected publishing job: ordinary PR/branch CI must **not** be allowed to trigger this job. Its initial build with an empty `RELEASE_VERSION` is a bootstrap and sends nothing.
+Create another standalone **Pipeline-from-SCM** job in your private Jenkins installation on `main` with Script Path **`Jenkinsfile.npm-release-discord`**. Set `PIPEX_DISCORD_NPM_JOB` to that job's full name **only inside the protected publisher's Jenkins configuration**, never in an untrusted PR build. Restrict **Job/Build** permissions to release maintainers and the protected publishing job: ordinary PR/branch CI must **not** be allowed to trigger this job. Its initial build with an empty `RELEASE_VERSION` is a bootstrap and sends nothing.
 
 The repository's ordinary CI does **not** publish to npm. Once you have an approved **protected npm-publish job**, queue a notification only **after `npm publish` succeeds** and the exact package version has been confirmed. For example, from that trusted release job:
 
 ~~~groovy
-build job: '/snyxex/PipeX-Npm-Release-Discord',
+build job: env.PIPEX_DISCORD_NPM_JOB,
   parameters: [
     string(name: 'RELEASE_VERSION', value: env.RELEASE_VERSION)
   ],
@@ -44,7 +44,7 @@ build job: '/snyxex/PipeX-Npm-Release-Discord',
   propagate: false
 ~~~
 
-The notifier independently checks that `https://registry.npmjs.org/pipex/<version>` reports the exact package and version. It is not proof of package ownership or release approval: verify `pipex` ownership before adding any publication credentials. Avoid running this from PRs or generic branch jobs.
+The protected publisher must verify that `PIPEX_DISCORD_NPM_JOB` is configured before queueing the notification. The notifier independently checks that `https://registry.npmjs.org/pipex/<version>` reports the exact package and version. It is not proof of package ownership or release approval: verify `pipex` ownership before adding any publication credentials. Avoid running this from PRs or generic branch jobs.
 
 A manually published npm package outside Jenkins is **not** automatically detected by this integration. To cover external publishers, add an approved registry event source or polling workflow with durable deduplication.
 
@@ -53,10 +53,10 @@ A manually published npm package outside Jenkins is **not** automatically detect
 This job sends the GitHub Release channel notification when a release is **published on GitHub**, independently of npm publication. It also covers releases published manually on the GitHub website.
 
 1. Install the **Generic Webhook Trigger** plugin in Jenkins (use a current, patched version compatible with the controller).
-2. Create another **standalone Pipeline-from-SCM** job under `snyxex`, e.g. **`PipeX-GitHub-Release-Discord`**, pinned to the PipeX repository's **`main`** branch with Script Path **`Jenkinsfile.github-release-discord`**.
+2. Create another **standalone Pipeline-from-SCM** job using an operator-chosen private Jenkins job name, pinned to the PipeX repository's **`main`** branch with Script Path **`Jenkinsfile.github-release-discord`**.
 3. Create a Jenkins Secret text credential `pipex-github-release-trigger-token`, holding a long random value. Its ID is referenced in the Jenkinsfile's `tokenCredentialId`.
 4. Run this Jenkins job once to install the webhook trigger configuration. Its first run (with no published release payload) **must not send a notification**.
-5. In GitHub, open **Snyxex/PipeX -> Settings -> Webhooks -> Add webhook**, configure Payload URL `https://jenkins.cloud.snyxe.de/generic-webhook-trigger/invoke?token=<the-random-trigger-token>`, Content type **application/json**, and subscribe to **Releases** events only. Use HTTPS. Treat the URL and token as sensitive.
+5. In GitHub, open **Snyxex/PipeX -> Settings -> Webhooks -> Add webhook**, configure the payload URL using your **privately configured** HTTPS Jenkins controller address plus `/generic-webhook-trigger/invoke?token=<the-random-trigger-token>`, Content type **application/json**, and subscribe to **Releases** events only. Use HTTPS. Treat the URL and token as sensitive.
 6. Test with a **new test release only if authorized**, or with an authenticated controlled webhook test in a safe environment. Do not create or publish a real release solely to test notifications without permission.
 
 The trigger extracts `$.action`, `$.repository.full_name`, `$.release.tag_name`, and `$.release.id` from the GitHub webhook. Only `published` events for `Snyxex/PipeX` run the sending stage. The notifier re-fetches the release from GitHub's API and verifies the release ID, tag, published state and release notes before forwarding. Drafts, edits and deletions are ignored.
