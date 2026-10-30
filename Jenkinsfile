@@ -1,9 +1,9 @@
 pipeline {
-  agent { label 'linux && docker' }
+  agent { label 'linux' }
 
   options {
     timestamps()
-    disableConcurrentBuilds(abortPrevious: true)
+    disableConcurrentBuilds()
     timeout(time: 45, unit: 'MINUTES')
     skipDefaultCheckout(true)
     buildDiscarder(logRotator(numToKeepStr: '20', artifactDaysToKeepStr: '7'))
@@ -22,11 +22,21 @@ pipeline {
       }
     }
 
-    stage('Trusted branch check') {
+    stage('Validate build source') {
       steps {
         script {
-          if (env.CHANGE_ID?.trim() || env.CHANGE_FORK?.trim()) {
-            error('PipeX CI runs only for trusted branches on this shared host agent; pull requests require an isolated agent.')
+          if (env.CHANGE_ID?.trim()) {
+            // Only PRs originating in this repository are eligible on the shared agent.
+            // Forks must use an isolated runner. Jenkinsfile changes still require review.
+            if (env.CHANGE_FORK?.trim()) {
+              error('Fork pull requests are not allowed on the shared Jenkins agent.')
+            }
+            if (env.CHANGE_TARGET != 'main') {
+              error('Only pull requests targeting main are allowed on this agent.')
+            }
+            if (!env.CHANGE_BRANCH?.trim()) {
+              error('Cannot verify pull request source branch; refusing shared-agent build.')
+            }
           }
         }
         sh '''
@@ -43,11 +53,25 @@ pipeline {
       }
     }
 
-    stage('Quality / Node 20.19.0') {
+    stage('Prepare PR merge test') {
+      when { changeRequest target: 'main' }
       steps {
         sh '''
           set -eu
-          mise exec node@20.19.0 -- bash -c '
+          # Jenkins checks out the PR head. Test the prospective merge with main,
+          # while keeping HEAD at the PR commit for the GitHub status context.
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git -c user.name='PipeX CI' -c user.email='ci@localhost' merge --no-commit --no-ff origin/main
+          echo 'PR working tree now contains the proposed merge with main.'
+        '''
+      }
+    }
+
+    stage('Quality / Node 26') {
+      steps {
+        sh '''
+          set -eu
+          mise exec node@26 -- bash -c '
             set -eu
             node --version
             npm --version
@@ -95,6 +119,7 @@ pipeline {
     }
 
     stage('GitHub dependency consumer') {
+      when { not { changeRequest() } }
       options {
         timeout(time: 10, unit: 'MINUTES')
       }
@@ -120,6 +145,7 @@ pipeline {
           mise exec node@24 -- npm pack --ignore-scripts --pack-destination .artifacts
           test -f dist/index.mjs
           test -f dist/index.d.mts
+          mise exec node@24 -- npm exec -- node scripts/verify-packed-consumer.mjs
         '''
         archiveArtifacts artifacts: '.artifacts/*.tgz,dist/**', fingerprint: true
       }
@@ -127,8 +153,14 @@ pipeline {
   }
 
   post {
-    always {
-      deleteDir()
+    cleanup {
+      script {
+        if (getContext(hudson.FilePath)) {
+          deleteDir()
+        } else {
+          echo 'Skipping workspace cleanup: no workspace context available.'
+        }
+      }
     }
   }
 }
