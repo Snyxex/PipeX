@@ -68,3 +68,25 @@ test('legacy decryption requires explicit opt-in', async () => {
   header[0] = 1;
   await assert.rejects(strict.binary.undo(header, 'buffer'), /legacy format disabled/);
 });
+
+
+test('authentication failures and logger output do not disclose key material', async () => {
+  const entries = [];
+  const logger = {
+    info: (message, context) => entries.push([message, context]),
+    warn: (message, context) => entries.push([message, context]),
+    error: (message, context) => entries.push([message, context]),
+    debug: (message, context) => entries.push([message, context]),
+  };
+  const engine = make();
+  engine.setLogger(logger);
+  const result = await engine.binary.run(Buffer.from('sensitive-message'));
+  const corrupted = Buffer.from(result.data);
+  corrupted[corrupted.length - 1] ^= 0x80;
+  let observed;
+  try { await engine.binary.undo(corrupted, 'buffer'); } catch (error) { observed = error; }
+  assert.ok(observed instanceof AuthenticationError);
+  const visible = JSON.stringify(entries) + String(observed);
+  assert.doesNotMatch(visible, /sensitive-message/);
+  assert.ok(!visible.includes(key.toString('hex')));
+});
