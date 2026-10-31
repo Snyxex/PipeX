@@ -1,221 +1,169 @@
 # PipeX
 
-PipeX is a typed Node.js data-transformation engine for composing compression, authenticated encryption, integrity checks, validation, and custom plugins across buffers, files, and streams.
+**Composable data processing for Node.js — secure, streaming, and extensible.**
 
-## Requirements
+PipeX is a TypeScript-first data-transformation engine for applications that need to serialize, compress, encrypt, validate, and process data without tying those operations to a specific transport or storage provider. Configure a pipeline once, then use it with in-memory values, files, or Node.js streams.
 
-- Node.js 22 or newer (Jenkins tests current 22.x, 24.x and 26.x)
-- ESM (`"type": "module"`)
+Built for backend services, data pipelines, internal tooling, and systems that exchange or persist binary payloads.
 
-## Installation
+## Highlights
 
-The npm package is being prepared as `@snyxex/pipex`; publication and
-scope ownership must be verified before installing it from the registry.
+- **Composable plugins:** Combine compression, authenticated encryption, HMAC integrity, validation, benchmarking, and your own processors.
+- **Three data interfaces:** Work with objects and buffers, files, or streams using one configured engine.
+- **Streaming with backpressure:** Process large inputs without treating every payload as a single in-memory buffer.
+- **Security-oriented defaults:** Authenticated encryption, bounded inputs and frames, timeouts, cancellation, and explicit decoding controls.
+- **Operational visibility:** Structured logging, tracing, audit hooks, progress notifications, bounded retries, and a caller-supplied failure sink.
+- **Extensible runtime:** Custom plugins, configuration-based pipelines, local worker pools, and application-provided KMS adapters.
+- **Typed ESM package:** TypeScript declarations and support for Node.js 22, 24, and 26.
 
-After publication:
+PipeX is a **processing engine**, not a message broker, database, object store, or network transport. You control where data comes from, where it goes, and how it is retained.
+
+## Install
 
 ```bash
 npm install @snyxex/pipex
 ```
 
-Until then, install the development version directly from this repository:
+**Requirements:** Node.js 22 or newer; ESM.
 
-```bash
-npm install github:Snyxex/PipeX
-```
-
-The older unscoped package `pipex` belongs to a different npm publisher.
-Do not install it expecting this project.
+> The unrelated, unscoped npm package `pipex` is not this project. Install `@snyxex/pipex`.
 
 ## Quick start
 
 ```ts
 import { randomBytes } from 'node:crypto';
-import { DataEngine, CompressionPlugin, EncryptionPlugin } from '@snyxex/pipex';
+import {
+  DataEngine,
+  CompressionPlugin,
+  EncryptionPlugin,
+} from '@snyxex/pipex';
 
 const engine = new DataEngine({
   maxInputBytes: 64 * 1024 * 1024,
   operationTimeoutMs: 30_000,
 })
   .use(new CompressionPlugin({ type: 'gzip', level: 6 }))
-  .use(new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: randomBytes(32) }));
+  .use(new EncryptionPlugin({
+    algorithm: 'aes-256-gcm',
+    key: randomBytes(32),
+  }));
 
-const result = await engine.binary.run({ id: 1, username: 'dev' });
-const restored = await engine.binary.undo(result, { timeoutMs: 30_000 });
+const encoded = await engine.binary.run({ id: 1, event: 'created' });
+const decoded = await engine.binary.undo(encoded);
 ```
 
-Keep encryption keys outside source control and load them from a secret manager or KMS in production.
-Generic KMS adapters expose queryable operation capabilities and receive an
-`AbortSignal` governed by the engine deadline. See
-[Production operations](./docs/enterprise.md#encryption-and-key-management).
+**Production note:** Keep encryption keys in your application's secret manager or KMS. Do not generate a new key per request when the data must be decryptable later.
 
-## Choosing the right API
+## How you can use PipeX
 
-| Use case | API | Notes |
+| Scenario | PipeX capability |
+| --- | --- |
+| Protect serialized application data | Compose compression and authenticated encryption for binary payloads |
+| Process files in backend services | Atomic file transformations with bounded streaming and file-system safeguards |
+| Transform Node.js streams | Apply plugin pipelines with backpressure, cancellation, and deadlines |
+| Exchange structured payloads | MessagePack serialization for supported object types |
+| Enforce application-specific rules | Register custom validation or processing plugins |
+| Run CPU-heavy local transforms | Bounded worker pools with queue controls and shutdown behavior |
+| Integrate production infrastructure | Add tracing, audit logging, custom KMS providers, and caller-owned failure sinks |
+
+## One engine, multiple interfaces
+
+| Interface | Operations | Purpose |
 | --- | --- | --- |
-| Transform an object or buffer in memory | `binary.run()` / `binary.undo()` | Applies the configured plugin chain |
-| Encode or decode MessagePack | `binary.pack()` / `binary.unpack()` | Serialization only; no plugins |
-| Transform an existing file | `file.process()` / `file.reverse()` | Atomic output replacement and bounded streaming |
-| Encode object frames to a file | `file.pack()` / `file.unpack()` | Serialization only; includes a manifest |
-| Transform Node.js byte streams | `stream.pipe()` | Applies plugins with backpressure |
-| Encode object streams | `stream.pack()` / `stream.unpack()` | Serialization only; includes a manifest |
+| **Binary** | `binary.run()`, `binary.undo()` | Apply and reverse configured transforms on in-memory data |
+| **Files** | `file.process()`, `file.reverse()` | Transform files, with controlled output boundaries |
+| **Streams** | `stream.pipe()` | Transform Node.js byte streams with backpressure |
+| **Serialization** | `binary.pack()`, `binary.unpack()`, `file.pack()`, `file.unpack()`, `stream.pack()`, `stream.unpack()` | Encode and decode MessagePack without applying plugins |
 
-`pack()` and `unpack()` never encrypt, compress, or hash. Use `run()`/`undo()`, `process()`/`reverse()`, or `stream.pipe()` for plugin transformations.
+**Important:** `pack()` and `unpack()` perform serialization only. They do **not** compress, encrypt, or hash data.
 
-For results received over a transport or reconstructed from storage, specify an
-application-owned type: `engine.binary.undo(received, { expectedType: 'object' })`.
-Never derive `expectedType` or the raw-buffer `forceType` from untrusted metadata.
-Locally produced results retain an implicit trusted type while their Buffer
-identity is preserved. This tightens the decoding contract without changing the
-ciphertext format; modified type metadata is rejected before decryption.
-
-## Files
-
-Output paths are constrained to `allowedRoot`. When it is omitted, PipeX uses the current working directory. Parent directories must already exist.
-
-```ts
-await engine.file.process('./data/input.bin', './data/input.pipex', './data', { timeoutMs: 60_000 });
-await engine.file.reverse('./data/input.pipex', './data/restored.bin', './data');
-```
-
-PipeX rejects traversal, symlink escapes, special files, and identical or hard-linked
-input/output files. File sessions acquire native handles before plugins run.
-Windows uses root-relative opens and handle-based replacement; POSIX uses
-no-follow directory-relative opens and a private temporary directory. Outputs
-are replaced only after successful processing. Koffi supplies the native bindings
-and is loaded only when using the file controller. Keep roots under the service
-account's exclusive control; see [File-system boundary](./docs/enterprise.md#file-system-boundary).
-
-## Streams and cancellation
+### Stream processing
 
 ```ts
 import { createReadStream, createWriteStream } from 'node:fs';
 
-const controller = new AbortController();
+const abort = new AbortController();
+
 await engine.stream.pipe(
   createReadStream('./input.bin'),
   createWriteStream('./output.pipex'),
   false,
-  { signal: controller.signal, timeoutMs: 30_000 },
+  { signal: abort.signal, timeoutMs: 30_000 },
 );
 ```
 
-Encryption streams use the versioned `PXAE` format and authenticate bounded
-frames before releasing each frame. A final authenticated frame detects
-truncation, while sequence numbers detect reordering and duplication. HMAC
-verification still withholds the complete bounded message because its appended
-digest authenticates the stream only at EOF.
-
-`EncryptionPlugin` defaults to 64 KiB plaintext frames (constrained by
-`maxFrameBytes`). Its v4 writer never emits the old unversioned format. The
-legacy reader is enabled temporarily for migration and can be disabled with
-`allowLegacyDecrypt: false`. See [Encryption v4 migration](./docs/encryption-v4-migration.md).
-
-## Configuration
-
-Built-in plugins are registered automatically:
+### File processing
 
 ```ts
-const engine = await DataEngine.fromConfig({
-  limits: { maxInputBytes: 32 * 1024 * 1024, operationTimeoutMs: 15_000 },
-  logger,
-  auditLogger,
-  plugins: [
-    { name: 'compression', options: { type: 'brotli', level: 5 } },
-    { name: 'hashing', options: { algorithm: 'sha256', secret: process.env.PIPEX_HMAC_SECRET } },
-  ],
-});
+await engine.file.process(
+  './data/input.bin',
+  './data/input.pipex',
+  './data',
+  { timeoutMs: 60_000 },
+);
 
-console.log(engine.pipeline);
-// ['compression@3.0.0', 'hashing@3.0.0']
+await engine.file.reverse(
+  './data/input.pipex',
+  './data/restored.bin',
+  './data',
+);
 ```
 
-Available names are `compression`, `encryption`, `hashing`, `benchmark`, `worker-pool`, `validation`, and `kms-encryption`. Options containing runtime objects, such as Zod schemas or KMS providers, must be supplied programmatically.
+The final root argument defines the permitted file-system boundary. PipeX checks traversal and link conditions and uses atomic output replacement; keep the root under the service account's control.
 
-The local `worker-pool` plugin executes caller-owned worker module exports with
-bounded threads, queue admission, task deadlines, and deterministic shutdown.
-See [Local worker pools](./docs/enterprise.md#local-worker-pools).
+## Plugins and configuration
 
-`fromConfig()` also accepts `limits`, `logger`, `tracer`, `auditLogger`, `dlq`, `schema`, and `schemaRegistry`. `dlq` is the compatibility name for an optional caller-provided failure sink; PipeX does not persist or replay its contents. Integration objects are validated immediately so configuration mistakes fail during startup.
-
-Register a custom plugin with `DataEngine.registerPlugin('redact', RedactPlugin)`.
-
-`engine.plugins` and `engine.pipeline` return immutable snapshots. Configure the pipeline before starting work; `use()` rejects changes while any operation is active.
-
-## Custom plugins
+Built-in plugin families include compression, encryption, hashing, validation, benchmarking, KMS encryption, and local worker pools. Add your own plugin with `BasePlugin`, or register it for configuration-driven pipelines.
 
 ```ts
-import { BasePlugin, type ProcessorContext } from '@snyxex/pipex';
+import { BasePlugin, DataEngine } from '@snyxex/pipex';
 
 class PrefixPlugin extends BasePlugin {
   readonly name = 'prefix';
   readonly version = '1.0.0';
 
-  process(data: Buffer, _context: ProcessorContext): Buffer {
+  process(data: Buffer): Buffer {
     return Buffer.concat([Buffer.from('PX:'), data]);
   }
 
-  reverse(data: Buffer, _context: ProcessorContext): Buffer {
+  reverse(data: Buffer): Buffer {
     return data.subarray(3);
   }
 }
+
+const customEngine = new DataEngine().use(new PrefixPlugin());
 ```
 
-Plugins without `createStream()` use a chunk-based fallback. They must be safe to run independently for every stream chunk. Plugins that need whole-message semantics should implement a framed native stream or use the binary API.
+For stream use, chunk-based custom plugins must be independently safe on every chunk. Implement a framed stream protocol if the transformation requires whole-message semantics.
 
-## Operational hooks
+## Reliability and security
 
-PipeX supports structured logging, audit logging, tracing, progress events,
-bounded retries, deadlines, concurrency limits, and an optional caller-provided
-failure sink. The existing `dlq`/`setDlq()` names remain supported for
-compatibility. See [Failure-sink semantics](./docs/enterprise.md#retries-and-caller-provided-failure-sink)
-before routing potentially sensitive chunks. Observer callback failures are
-isolated from data processing.
+PipeX supports size limits, operation deadlines, cancellation, bounded concurrency, error classification, audit hooks, and authenticated stream framing. Encrypted streams authenticate each bounded frame before releasing its plaintext; a final authentication frame detects truncation.
 
-```ts
-engine.setLogger(logger).setAuditLogger(auditLogger).on('error', (error, requestId) => {
-  console.error({ requestId, error: error.message });
-});
-```
+When reversing data received from outside your process, provide an application-owned expected type rather than trusting type hints from the payload. For deployments that process sensitive data, review the production security guidance before shipping.
 
-See [Architecture](./docs/architecture.md) and [Production operations](./docs/enterprise.md).
+PipeX does **not** provide built-in durable queues, automatic replay, scheduling, or key storage. The optional `dlq` interface is a caller-provided failure sink.
+
+## Documentation
+
+- [Architecture and design](docs/architecture.md)
+- [Production configuration, security, and operations](docs/enterprise.md)
+- [Encryption format migration](docs/encryption-v4-migration.md)
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Support](SUPPORT.md)
+- [Security policy](SECURITY.md)
 
 ## Development
-
-Use Node.js 22 or newer with npm (Jenkins validates current Node.js 22, 24, and 26 releases).
 
 ```bash
 npm ci --ignore-scripts --no-audit --no-fund
 npm run quality:ci
 npm audit --audit-level=high
-npm pack --dry-run --json --ignore-scripts
 ```
 
-`npm run quality:ci` executes the production typecheck, build, tooling, unit,
-integration, security, package, consumer, and short performance suites.
-Jenkins is the only configured CI system; the root `Jenkinsfile` tests PRs
-and branches and archives an npm tarball but does not publish it.
-
-For release planning see [Release procedure](docs/releasing.md) and
-[Release readiness](docs/npm-release-readiness.md). Perform a full secret scan,
-verify the npm publishing identity, and use a separately protected release job
-before distributing any tarball.
-
-Large throughput benchmarking is intentionally excluded from `npm test` and
-CI. Run it manually with `npm run benchmark:large` and
-`PIPEX_BENCHMARK_BYTES` as needed.
+The quality suite includes TypeScript checks, builds, tooling, unit, integration, security, package, consumer, and performance smoke tests. See [maintainer release documentation](docs/releasing.md) for the protected Jenkins release process.
 
 ## License
 
 MIT © Snyxex
-
-## Contributing and security
-
-- [Contributing guide](CONTRIBUTING.md)
-- [Support](SUPPORT.md)
-- [Security policy and responsible disclosure](SECURITY.md)
-- [Code of conduct](CODE_OF_CONDUCT.md)
-- [Changelog](CHANGELOG.md)
-- [Release preparation](docs/releasing.md)
-
-Use GitHub issues for ordinary bugs and features, **not** for undisclosed vulnerabilities. Jenkins is the project CI system; no GitHub Actions workflows are configured.
