@@ -183,6 +183,8 @@ new WorkerPoolPlugin(options: {
   taskTimeoutMs?: number;
   closeTimeoutMs?: number;
 });
+new ValidationPlugin(options: { schema: import('zod').z.ZodType<any>; validateOnReverse?: boolean });
+new BenchmarkPlugin();
 new KmsEncryptionPlugin(options: {
   kms: KmsProvider;
   keyId: string;
@@ -240,7 +242,7 @@ These classes reject unsupported operations, invalid capabilities, deadlines, ca
 - The KMS envelope uses the `PXKM` format with an explicit legacy migration option.
 - Persisted transformed data requires the same logical plugin order, compatible formats, and the appropriate keys to reverse.
 
-The presence of a version number does not guarantee that every future release will support every historical format.
+The `PXAE` header has its own wire-format version; the plugin implementation is version 4.0.0. These are separate version values. The presence of a version number does not guarantee that every future release will support every historical format.
 
 ## Resource and security guidance
 
