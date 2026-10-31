@@ -108,8 +108,8 @@ digest authenticates the stream only at EOF.
 
 `EncryptionPlugin` defaults to 64 KiB plaintext frames (constrained by
 `maxFrameBytes`). Its v4 writer never emits the old unversioned format. The
-legacy reader is enabled temporarily for migration and can be disabled with
-`allowLegacyDecrypt: false`. See [Encryption v4 migration](./docs/encryption-v4-migration.md).
+legacy reader is disabled by default. Explicitly enable it for a controlled migration with
+`allowLegacyDecrypt: true`, then turn it off again. See [Encryption v4 migration](./docs/encryption-v4-migration.md).
 
 ## Configuration
 
