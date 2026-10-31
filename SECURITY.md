@@ -16,7 +16,7 @@ Use the latest maintained version. Supported Node.js major versions are 22, 24, 
 
 **Do not create a public issue, discussion, or pull request containing an undisclosed vulnerability, exploit, credential, or personal information.**
 
-Use [GitHub's private vulnerability reporting for PipeX](https://github.com/Snyxex/PipeX/security/advisories/new), **if the repository has private reporting enabled**. If that form is unavailable, open a public issue requesting a private reporting channel **without including technical vulnerability details**, and wait for a secure route before submitting the report.
+**Responsible-disclosure contact:** [GitHub private vulnerability report for PipeX](https://github.com/Snyxex/PipeX/security/advisories/new), when private reporting is enabled for the repository. This is the preferred secure submission channel. If that form is unavailable, open a public issue requesting a private reporting channel **without including technical vulnerability details**, and wait for a secure route before submitting the report.
 
 A useful report includes the affected versions and environment, impact, concise reproduction steps or a proof of concept, and mitigations if known. Do not submit real user data, production secrets, or live credentials.
 
@@ -32,7 +32,7 @@ If you discover exposed credentials, treat them as compromised: revoke or rotate
 - File operations require an application-controlled `allowedRoot`. Keep allowed roots writable only by trusted principals.
 - Set appropriate size, concurrency, timeout, and framing limits; handle cancellation and stream backpressure.
 - `dlq` / `setDlq()` are caller-owned failure sinks, not persistent replay or a queue.
-- Consult [enterprise security guidance](docs/enterprise.md) and [encryption migration guidance](docs/encryption-v4-migration.md).
+- Consult [the encryption threat model and key-management guidance](docs/security.md), [enterprise security guidance](docs/enterprise.md), and [encryption migration guidance](docs/encryption-v4-migration.md).
 
 ## Supply-chain practices
 
