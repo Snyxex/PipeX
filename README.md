@@ -26,7 +26,6 @@ npm install @snyxex/pipex
 
 **Requirements:** Node.js 22 or newer; ESM.
 
-> The unrelated, unscoped npm package `pipex` is not this project. Install `@snyxex/pipex`.
 
 ## Quick start
 
@@ -162,7 +161,6 @@ npm run quality:ci
 npm audit --audit-level=high
 ```
 
-The quality suite includes TypeScript checks, builds, tooling, unit, integration, security, package, consumer, and performance smoke tests. See [maintainer release documentation](docs/releasing.md) for the protected Jenkins release process.
 
 ## License
 
