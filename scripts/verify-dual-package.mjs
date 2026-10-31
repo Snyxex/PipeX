@@ -13,7 +13,20 @@ const modules = ['@snyxex/pipex', ...entrypoints.slice(1).map(s => '@snyxex/pipe
 const run = (cmd, args, cwd = sandbox) => execFileSync(cmd, args, { cwd, stdio: 'inherit' });
 
 try {
-  // npm 10 may emit prepare/tsdown output before its --json payload even\n  // with --ignore-scripts. Extract the JSON array rather than parsing stdout\n  // from byte zero. The package allowlist is still enforced below.\n  const packOutput = execFileSync(process.execPath, [npm, 'pack', '--dry-run', '--json', '--ignore-scripts'], {cwd:project, encoding:'utf8', env: {...process.env, NO_COLOR:'1', FORCE_COLOR:'0'}});\n  const jsonStart = /^\\[\\s*\\{/m.exec(packOutput);\n  assert.ok(jsonStart, 'npm pack did not emit a JSON manifest');\n  const metadata = JSON.parse(packOutput.slice(jsonStart.index));
+  // npm may emit lifecycle output before its JSON payload. Parse the
+  // JSON array after that output without weakening the tarball allowlist.
+  const packOutput = execFileSync(process.execPath, [
+    npm, 'pack', '--dry-run', '--json', '--ignore-scripts',
+  ], {
+    cwd: project,
+    encoding: 'utf8',
+    env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+  });
+  const jsonStart = packOutput.indexOf('[{');
+  const fallbackStart = /^\[\s*\{/m.exec(packOutput);
+  const startOffset = jsonStart >= 0 ? jsonStart : fallbackStart?.index ?? -1;
+  assert.ok(startOffset >= 0, 'npm pack did not emit a JSON manifest');
+  const metadata = JSON.parse(packOutput.slice(startOffset));
   const paths = metadata[0].files.map(file => file.path);
   const allowed = new Set(['package.json', 'README.md', 'LICENSE', 'CHANGELOG.md']);
   for (const path of paths) assert.ok(allowed.has(path) || path.startsWith('dist/'), 'Unexpected npm file: ' + path);
