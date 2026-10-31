@@ -1,13 +1,20 @@
-import { defineConfig } from "tsdown";
+import { defineConfig } from 'tsdown';
 
 export default defineConfig({
-    entry: ['./src/index.ts'],
-    platform: 'node',
-    outDir: './dist',
-    format: ['esm'],
-    dts: {
-      sourcemap: true,
-     
-    },
-    sourcemap: true,
-})
+  entry: {
+    index: './src/index.ts',
+    compression: './src/entries/compression.ts',
+    encryption: './src/entries/encryption.ts',
+    hashing: './src/entries/hashing.ts',
+    validation: './src/entries/validation.ts',
+    parallel: './src/entries/parallel.ts',
+    native: './src/entries/native.ts',
+    kms: './src/entries/kms.ts',
+  },
+  platform: 'node',
+  outDir: './dist',
+  format: ['esm', 'cjs'],
+  dts: true,
+  sourcemap: true,
+  clean: true,
+});
