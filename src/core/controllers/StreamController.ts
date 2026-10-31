@@ -72,7 +72,10 @@ export class StreamController {
       write(chunk, encoding, callback) {
         // Let the source's writable callback regulate upstream backpressure.
         if (source.destroyed) {
-          callback(new Error('[PipeX] Stream pipeline is closed'));
+          // The destination may fail before pipeline() settles. Preserve its
+          // original error instead of replacing it with a generic close error.
+          const cause = destination.errored ?? source.errored;
+          callback(cause instanceof Error ? cause : new Error('[PipeX] Stream pipeline is closed'));
           return;
         }
         source.write(chunk, encoding, callback);
