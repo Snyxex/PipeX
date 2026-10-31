@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
-test('npm publishing is isolated, manually approved and absent from normal CI', async () => {
+test('npm staging is isolated, manually approved and absent from normal CI', async () => {
   const publisher = await readFile(new URL('../../Jenkinsfile.npm-publish', import.meta.url), 'utf8');
   const branch = await readFile(new URL('../../Jenkinsfile', import.meta.url), 'utf8');
   const readonly = await readFile(new URL('../../Jenkinsfile.release-check', import.meta.url), 'utf8');
@@ -24,7 +24,11 @@ test('npm publishing is isolated, manually approved and absent from normal CI', 
   assert.doesNotMatch(publisher, /--version 1\.0\.2/);
   assert.doesNotMatch(readonly, /defaultValue: '1\.0\.2'/);
   assert.match(publisher, /input message:/);
-  assert.match(publisher, /npm publish \.artifacts\/\$\{RELEASE_ARCHIVE\}/);
+  assert.match(publisher, /npm stage publish \.artifacts\/\$\{RELEASE_ARCHIVE\}/);
+  assert.doesNotMatch(publisher, /\bnpm publish \.artifacts\//);
+  assert.match(publisher, /Stage exact candidate on npm/);
+  assert.match(publisher, /separate npm 2FA approval/);
+  assert.match(publisher, /env\.RELEASE_COMMIT = sh\(script: 'git rev-parse HEAD'/);
   assert.match(publisher, /withCredentials\(\[string\(credentialsId:/);
   assert.match(publisher, /NPM_CONFIG_USERCONFIG/);
   assert.match(publisher, /trap 'rm -f "\$CONFIG"'/);
