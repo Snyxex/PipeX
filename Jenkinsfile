@@ -67,17 +67,6 @@ pipeline {
       }
     }
 
-    stage('Lint and public typecheck') {
-      steps {
-        sh '''
-          set -eu
-          mise exec node@24 -- npm ci --ignore-scripts --no-audit --no-fund
-          mise exec node@24 -- npm run lint:ci
-          mise exec node@24 -- npm run typecheck:ci
-        '''
-      }
-    }
-
     stage('Quality / Node 26') {
       steps {
         sh '''

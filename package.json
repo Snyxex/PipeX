@@ -26,7 +26,6 @@
     "quality:ci": "npm run typecheck && npm run build && npm run test:tooling && npm run test:unit && npm run test:integration && npm run test:security && npm run test:package:built && npm run test:consumer:built && npm run test:performance:built && npm run test:dual-package",
     "benchmark:large": "npm run build && node scripts/run-test-suite.mjs --suffix=.benchmark.mjs --timeout=600000 benchmarks",
     "typecheck": "npm run typecheck:prod && npm run typecheck:types",
-    "typecheck:types": "tsc -p tsconfig.types.json --noEmit",
     "typecheck:prod": "tsc -p tsconfig.prod.json --noEmit",
     "build": "tsdown --minify",
     "prepare": "npm run build",
@@ -37,7 +36,9 @@
     "typecheck:ci": "tsc -p tsconfig.ci-types.json --noEmit",
     "test:vitest": "vitest run",
     "coverage:vitest": "vitest run --coverage",
-    "test:examples": "node scripts/verify-examples.mjs"
+    "test:examples": "node scripts/verify-examples.mjs",
+    "report:bundle-size": "node scripts/report-bundle-size.mjs",
+    "typecheck:types": "tsc -p tsconfig.types.json --noEmit"
   },
   "keywords": [
     "data-transformation",
@@ -162,7 +163,10 @@
     }
   },
   "files": [
-    "dist",
+    "dist/*.mjs",
+    "dist/*.cjs",
+    "dist/*.d.mts",
+    "dist/*.d.cts",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

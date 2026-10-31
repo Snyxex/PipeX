@@ -20,7 +20,7 @@ test('package metadata, lockfile root, and dual ESM/CJS export targets agree', a
   assert.equal(manifest.scripts.prepare, 'npm run build');
   assert.equal(manifest.repository.url, 'git+https://github.com/Snyxex/PipeX.git');
   assert.equal(manifest.bugs.url, 'https://github.com/Snyxex/PipeX/issues');
-  assert.deepEqual(manifest.files, ['dist', 'README.md', 'LICENSE', 'CHANGELOG.md']);
+  assert.deepEqual(manifest.files, ['dist/*.mjs', 'dist/*.cjs', 'dist/*.d.mts', 'dist/*.d.cts', 'README.md', 'LICENSE', 'CHANGELOG.md']);
   assert.ok(manifest.devDependencies.tsdown);
   assert.ok(manifest.devDependencies.typescript);
   assert.deepEqual(Object.keys(manifest.exports), paths);
