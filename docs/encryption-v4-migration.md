@@ -29,12 +29,12 @@ aggregate output limits are checked before frame allocation and cryptography.
 
 ## Rolling migration
 
-1. Deploy v4 readers while leaving `allowLegacyDecrypt` at its default `true`.
+1. Deploy modern readers with an **explicit** `allowLegacyDecrypt: true` only in the controlled migration environment. The hardened default is `false`.
 2. New writes immediately use `PXAE` or `PXKM`; no legacy ciphertext is emitted.
 3. Re-encrypt retained legacy records by decrypting them with the migration
    reader and writing them again with the current plugin.
 4. After all retained ciphertext has been migrated, set
-   `allowLegacyDecrypt: false` on both encryption plugin types.
+   `allowLegacyDecrypt: false` on both encryption plugin types (or omit the option after migrating).
 
 Legacy stream decryption is compatibility-only and still buffers the complete
 legacy packet up to the configured aggregate limit. Disable it after migration

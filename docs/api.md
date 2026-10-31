@@ -382,7 +382,6 @@ The `PXAE` header uses wire-format version 1, while the encryption plugin implem
 
 See [production operations](enterprise.md), [architecture](architecture.md), and [encryption migration](encryption-v4-migration.md). Prefer explicit operation limits and timeouts, native streams for large payloads, private filesystem roots, and external key storage. `piscina` and `koffi` are regular dependencies even though worker and native-file usage is opt-in at runtime.
 
-
 ## Typed errors
 
 All public domain errors inherit from `PipeXError` (and `Error`). They expose `name`, `code`, `message`, optional `cause`, `transformName` and `stage`. The new fixed error messages never serialize payloads, keys or passphrases. Do not attach untrusted provider errors as causes or log input buffers.
@@ -391,7 +390,7 @@ All public domain errors inherit from `PipeXError` (and `Error`). They expose `n
 | --- | --- | --- |
 | `ValidationError` | `VALIDATION_FAILED` | Invalid serialized input or schema validation |
 | `CompressionError` | `COMPRESSION_FAILED` | Compression/decompression or size validation |
-| `EncryptionError` | `ENCRYPTION_FAILED` | Invalid encryption configuration |
+| `EncryptionError` | `ENCRYPTION_ERROR` | Invalid encryption configuration |
 | `HashingError` | `HASHING_FAILED` | HMAC verification or hashing failure |
 | `PipelineAbortedError` | `OPERATION_ABORTED` | Cancellation; existing `OperationAbortedError` inherits from it |
 | `UnsupportedAlgorithmError` | `UNSUPPORTED_ALGORITHM` | Unsupported compression, encryption or hash algorithm |

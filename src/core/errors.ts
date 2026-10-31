@@ -1,12 +1,14 @@
 export type PipeXErrorCode =
   | 'VALIDATION_FAILED'
   | 'COMPRESSION_FAILED'
-  | 'ENCRYPTION_FAILED'
   | 'HASHING_FAILED'
   | 'UNSUPPORTED_ALGORITHM'
   | 'UNSUPPORTED_REVERSE'
   | 'UNSUPPORTED_STREAMING'
   | 'INVALID_PLUGIN_CAPABILITY'
+  | 'ENCRYPTION_ERROR'
+  | 'INVALID_ENCRYPTION_KEY'
+  | 'ENCRYPTION_AUTHENTICATION_FAILED'
   | 'OPERATION_ABORTED'
   | 'OPERATION_TIMEOUT'
   | 'KMS_PROVIDER_FAILURE'
@@ -30,12 +32,11 @@ export class PipeXError extends Error {
     message: string,
     options?: ErrorOptions & { transformName?: string; stage?: string },
   ) {
-    super(message, options?.cause === undefined ? undefined : { cause: options.cause });
+    super(message, options);
     this.transformName = options?.transformName;
     this.stage = options?.stage;
   }
 }
-
 
 /** Domain failures use fixed, non-sensitive messages. Never include input, keys or arbitrary provider errors. */
 export class ValidationError extends PipeXError {
@@ -48,12 +49,6 @@ export class CompressionError extends PipeXError {
   override readonly name = 'CompressionError';
   constructor(options?: ErrorOptions & { transformName?: string; stage?: string }) {
     super('COMPRESSION_FAILED', '[PipeX] Compression failed', options);
-  }
-}
-export class EncryptionError extends PipeXError {
-  override readonly name = 'EncryptionError';
-  constructor(options?: ErrorOptions & { transformName?: string; stage?: string }) {
-    super('ENCRYPTION_FAILED', '[PipeX] Encryption failed', options);
   }
 }
 export class HashingError extends PipeXError {
@@ -72,7 +67,7 @@ export class UnsupportedAlgorithmError extends PipeXError {
 export class PipelineAbortedError extends PipeXError {
   override readonly name: string = 'PipelineAbortedError';
   constructor(options?: ErrorOptions & { transformName?: string; stage?: string }) {
-    super('OPERATION_ABORTED', '[PipeX] Operation aborted', options);
+    super(options);
   }
 }
 
@@ -119,7 +114,7 @@ export class InvalidPluginCapabilityError extends PipeXError {
 export class OperationAbortedError extends PipelineAbortedError {
   public override readonly name: string = 'OperationAbortedError';
   constructor(options?: ErrorOptions) {
-    super(options);
+    super('OPERATION_ABORTED', '[PipeX] Operation aborted', options);
   }
 }
 
@@ -205,5 +200,27 @@ export class WorkerTaskError extends PipeXError {
   public override readonly name: string = 'WorkerTaskError';
   constructor(public readonly taskName: string, options?: ErrorOptions) {
     super('WORKER_TASK_FAILURE', `[PipeX] Worker task ${taskName} failed`, options);
+  }
+}
+
+/** Public cryptographic failure categories; never include keys or ciphertext in messages. */
+export class EncryptionError extends PipeXError {
+  public override readonly name: string = 'EncryptionError';
+  constructor(message = '[PipeX] Encryption operation failed') {
+    super('ENCRYPTION_ERROR', message);
+  }
+}
+
+export class InvalidKeyError extends PipeXError {
+  public override readonly name: string = 'InvalidKeyError';
+  constructor() {
+    super('INVALID_ENCRYPTION_KEY', '[PipeX] Encryption key must be a 32-byte Buffer');
+  }
+}
+
+export class AuthenticationError extends PipeXError {
+  public override readonly name: string = 'AuthenticationError';
+  constructor() {
+    super('ENCRYPTION_AUTHENTICATION_FAILED', '[PipeX] Encrypted data authentication failed');
   }
 }

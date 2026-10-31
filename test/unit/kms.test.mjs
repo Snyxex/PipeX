@@ -82,7 +82,9 @@ test('KMS authenticates envelope metadata and provides an explicit legacy migrat
   }
 
   const legacy = legacyEnvelope(Buffer.from('legacy payload'));
-  assert.equal((await plugin.reverse(legacy, {})).toString(), 'legacy payload');
+  await assert.rejects(plugin.reverse(legacy, {}), /legacy format disabled/);
+  const migrationReader = new KmsEncryptionPlugin({ keyId: 'test-key', kms: provider(), allowLegacyDecrypt: true });
+  assert.equal((await migrationReader.reverse(legacy, {})).toString(), 'legacy payload');
   const strict = new KmsEncryptionPlugin({ keyId: 'test-key', kms: provider(), allowLegacyDecrypt: false });
   await assert.rejects(strict.reverse(legacy, {}), /legacy format disabled/);
 });
