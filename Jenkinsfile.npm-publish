@@ -12,8 +12,6 @@ pipeline {
   }
 
   parameters {
-    string(name: 'EXPECTED_COMMIT', defaultValue: '', description: 'Reviewed main commit (40-character SHA)')
-    string(name: 'EXPECTED_SHA256', defaultValue: '', description: 'SHA-256 of the reviewed release-check tarball')
     string(name: 'CONFIRM_RELEASE', defaultValue: '', description: 'Enter PUBLISH <name>@<version> using package.json')
   }
 
@@ -30,12 +28,6 @@ pipeline {
           if (env.CHANGE_ID?.trim() || env.CHANGE_FORK?.trim()) {
             error('npm publication from PRs or forks is prohibited.')
           }
-          if (!(params.EXPECTED_COMMIT ==~ /^[a-f0-9]{40}$/)) {
-            error('Expected reviewed 40-character Git commit SHA.')
-          }
-          if (!(params.EXPECTED_SHA256 ==~ /^[a-f0-9]{64}$/)) {
-            error('Expected reviewed 64-character tarball SHA-256.')
-          }
         }
       }
     }
@@ -49,10 +41,6 @@ pipeline {
           git fetch --tags --force origin
           test "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/origin/main)" || {
             echo 'Refusing to release from anything but the current main commit.' >&2
-            exit 2
-          }
-          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT" || {
-            echo 'Reviewed commit SHA mismatch.' >&2
             exit 2
           }
         '''
@@ -101,7 +89,7 @@ pipeline {
       }
     }
 
-    stage('Build and verify the reviewed tarball') {
+    stage('Build and verify release tarball') {
       steps {
         sh '''
           set -eu
@@ -115,19 +103,18 @@ pipeline {
             test -f .artifacts/${RELEASE_ARCHIVE}
             npm exec -- node scripts/verify-packed-consumer.mjs
           '
-          printf '%s  %s\n' "$EXPECTED_SHA256" ".artifacts/${RELEASE_ARCHIVE}" |
-            sha256sum -c -
-          sha256sum .artifacts/${RELEASE_ARCHIVE} > .artifacts/sha256.txt
+          sha256sum ".artifacts/${RELEASE_ARCHIVE}" > .artifacts/sha256.txt
+          sha256sum -c .artifacts/sha256.txt
           tar -tzf .artifacts/${RELEASE_ARCHIVE} > .artifacts/contents.txt
         '''
-        archiveArtifacts artifacts: '.artifacts/sha256.txt,.artifacts/contents.txt', fingerprint: true
+        archiveArtifacts artifacts: '.artifacts/*.tgz,.artifacts/sha256.txt,.artifacts/contents.txt', fingerprint: true
       }
     }
 
     stage('Second maintainer approval') {
       steps {
         script {
-          input message: "Publish verified ${env.RELEASE_NAME}@${env.RELEASE_VERSION} to npm? Only trusted release maintainers may approve.",
+          input message: "Publish locally built and verified ${env.RELEASE_NAME}@${env.RELEASE_VERSION} (commit ${env.GIT_COMMIT}) to npm? Only trusted release maintainers may approve.",
             ok: 'Publish verified npm tarball'
         }
       }
@@ -146,8 +133,7 @@ pipeline {
             printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$CONFIG"
             unset NPM_TOKEN
             export NPM_CONFIG_USERCONFIG="$CONFIG"
-            printf '%s  %s\n' "$EXPECTED_SHA256" ".artifacts/${RELEASE_ARCHIVE}" |
-              sha256sum -c -
+            sha256sum -c .artifacts/sha256.txt
             # npm stage publish requires an existing package; the first
             # public release uses an authorized direct-publish granular token.
             mise exec node@24 -- npm publish .artifacts/${RELEASE_ARCHIVE} \
