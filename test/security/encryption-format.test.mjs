@@ -147,7 +147,9 @@ test('legacy v3 packets remain readable only when migration compatibility is ena
   const key = randomBytes(32);
   const input = Buffer.from('legacy encrypted payload');
   const legacy = legacyEncrypt(input, key);
-  const compatible = new EncryptionPlugin({ algorithm: 'aes-256-gcm', key });
+  const defaultReader = new EncryptionPlugin({ algorithm: 'aes-256-gcm', key });
+  await assert.rejects(defaultReader.reverse(legacy, {}), /legacy format disabled/);
+  const compatible = new EncryptionPlugin({ algorithm: 'aes-256-gcm', key, allowLegacyDecrypt: true });
   assert.deepEqual(await compatible.reverse(legacy, {}), input);
   assert.deepEqual(await collect(Readable.from([...legacy].map(byte => Buffer.from([byte]))).pipe(compatible.createStream('decompress'))), input);
 
