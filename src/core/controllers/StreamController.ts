@@ -70,7 +70,12 @@ export class StreamController {
     let finalCallback: ((error?: Error | null) => void) | undefined;
     const endpoint = new Writable({
       write(chunk, encoding, callback) {
-        // Forward the callback so Node's writable backpressure tracks the\n        // internal PassThrough rather than accepting unbounded input.\n        if (source.destroyed) {\n          callback(new Error('[PipeX] Stream pipeline is closed'));\n          return;\n        }\n        source.write(chunk, encoding, callback);
+        // Let the source's writable callback regulate upstream backpressure.
+        if (source.destroyed) {
+          callback(new Error('[PipeX] Stream pipeline is closed'));
+          return;
+        }
+        source.write(chunk, encoding, callback);
       },
       final(callback) {
         finalCallback = callback;
