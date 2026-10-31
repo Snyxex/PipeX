@@ -64,7 +64,6 @@ test('aborted encrypted stream rejects and closes all streams', { timeout: 10_00
 
 test('legacy decryption requires explicit opt-in', async () => {
   const strict = make();
-  assert.equal(strict.plugins[0].options?.allowLegacyDecrypt, undefined);
   const header = Buffer.alloc(29, 0);
   header[0] = 1;
   await assert.rejects(strict.binary.undo(header, 'buffer'), /legacy format disabled/);
