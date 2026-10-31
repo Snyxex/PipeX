@@ -37,9 +37,8 @@ pipeline {
     stage('Read release metadata from package.json') {
       steps {
         script {
-          def pkg = new groovy.json.JsonSlurperClassic().parseText(readFile('package.json'))
-          env.RELEASE_NAME = pkg.name
-          env.RELEASE_VERSION = pkg.version
+          env.RELEASE_NAME = sh(script: "mise exec node@24 -- node -p \"require('./package.json').name\"", returnStdout: true).trim()
+          env.RELEASE_VERSION = sh(script: "mise exec node@24 -- node -p \"require('./package.json').version\"", returnStdout: true).trim()
           if (!(env.RELEASE_NAME ==~ /^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/)) {
             error('Invalid scoped npm package name in package.json')
           }
