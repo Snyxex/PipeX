@@ -11,7 +11,7 @@ const chain = typedPipeline((value: string) => value.length)
 type InputType = Parameters<typeof chain.run>[0];
 type OutputType = Awaited<ReturnType<typeof chain.run>>;
 type CheckInput = Assert<Equal<InputType, string>>;
-type CheckOutput = Assert<Equal<OutputType, string>>;
+type CheckOutput = Assert<Equal<OutputType, 'large' | 'small'>>;
 void (0 as unknown as CheckInput);
 void (0 as unknown as CheckOutput);
 const result: Promise<string> = chain.run('hello');
