@@ -76,9 +76,15 @@ pipeline {
             node --version
             npm --version
             npm ci --ignore-scripts --no-audit --no-fund
+            export PIPEX_JUNIT_DIR="$WORKSPACE/.artifacts/junit/node26"
             npm run quality:ci
           '
         '''
+      }
+      post {
+        always {
+          junit testResults: '.artifacts/junit/node26/*.xml', allowEmptyResults: true, skipPublishingChecks: false
+        }
       }
     }
 
@@ -91,9 +97,15 @@ pipeline {
             node --version
             npm --version
             npm ci --ignore-scripts --no-audit --no-fund
+            export PIPEX_JUNIT_DIR="$WORKSPACE/.artifacts/junit/node22"
             npm run quality:ci
           '
         '''
+      }
+      post {
+        always {
+          junit testResults: '.artifacts/junit/node22/*.xml', allowEmptyResults: true, skipPublishingChecks: false
+        }
       }
     }
 
@@ -106,9 +118,15 @@ pipeline {
             node --version
             npm --version
             npm ci --ignore-scripts --no-audit --no-fund
+            export PIPEX_JUNIT_DIR="$WORKSPACE/.artifacts/junit/node24"
             npm run quality:ci
           '
         '''
+      }
+      post {
+        always {
+          junit testResults: '.artifacts/junit/node24/*.xml', allowEmptyResults: true, skipPublishingChecks: false
+        }
       }
     }
 
