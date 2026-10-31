@@ -193,6 +193,43 @@ Authenticated encryption emits bounded frames, each verified before its plaintex
 
 Cancellation uses `AbortSignal`; operation limits and deadlines apply to stream processing.
 
+### Lifecycle, cancellation, and cleanup
+
+PipeX runs byte-stream transformations through Node.js `stream/promises.pipeline()`. This awaits completion, propagates failures from the source, any plugin transform, or the destination, and destroys connected streams when a stage fails or the operation is aborted.
+
+```ts
+import { createReadStream, createWriteStream } from 'node:fs';
+import { DataEngine, CompressionPlugin } from '@snyxex/pipex';
+
+const controller = new AbortController();
+const engine = new DataEngine().use(new CompressionPlugin({ type: 'gzip' }));
+
+await engine.stream.pipe(
+  createReadStream('./input.bin'),
+  createWriteStream('./output.px'),
+  false,
+  { signal: controller.signal, timeoutMs: 30_000 },
+);
+
+// controller.abort() cancels an operation in progress.
+```
+
+For a destination you already own, `stream.into(destination, options)` and `stream.reverseInto(destination, options)` expose a writable endpoint. Connect external sources using `pipeline()`, **not** unguarded `.pipe()`:
+
+```ts
+import { pipeline } from 'node:stream/promises';
+
+await pipeline(
+  createReadStream('./input.bin'),
+  engine.stream.into(createWriteStream('./output.px'), { signal: controller.signal }),
+  { signal: controller.signal },
+);
+```
+
+Backpressure propagates through the transforms: a slow downstream writable pauses upstream reads instead of buffering the entire input. Memory still depends on configured frame limits and plugin implementations; `binary.run()` is deliberately in-memory, and HMAC verification may hold a bounded complete message until its digest is verified.
+
+**Lifecycle rules:** Each invocation requires fresh source and destination stream instances; the same `DataEngine` may process multiple operations. On abort or failure, the source, plugin streams, and destination are destroyed. A failed destination can contain partial output: use the file controller's atomic-output operations when partial files must not become visible. Set `timeoutMs` and resource limits appropriate for large inputs. A caller-owned `AbortSignal` is supported by binary, stream, and file controllers; aborted operations reject rather than producing partial success.
+
 ## API Reference
 
 See **[docs/api.md](docs/api.md)** for public entry points, signatures, options, return values, error classes, and serialization semantics.
