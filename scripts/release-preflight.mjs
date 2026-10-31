@@ -33,7 +33,7 @@ export function checkReleaseSpec(manifest, expectedName, expectedVersion, tags =
     errors.push('Public bug-reporting metadata is missing.');
   }
   for (const required of ['dist', 'LICENSE', 'README.md', 'CHANGELOG.md']) {
-    if (!manifest.files?.includes(required)) errors.push('Missing public tarball entry: ' + required);
+    if (!(manifest.files ?? []).some(entry => entry === required || (required === 'dist' && (entry === 'dist/**' || entry.startsWith('dist/'))))) errors.push('Missing public tarball entry: ' + required);
   }
   if ((manifest.files ?? []).some(path => path === 'docs' || path.startsWith('.ci') || path.startsWith('test/') || path.includes('jenkins'))) {
     errors.push('Public tarball allowlist contains internal CI or test content.');
