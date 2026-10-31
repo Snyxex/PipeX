@@ -15,7 +15,7 @@ import { assertKmsOperation, getKmsProviderCapabilities } from '../core/kmsCapab
 export interface KmsEncryptionOptions {
   kms: KmsProvider;
   keyId: string;
-  /** Temporarily accept the unversioned v1 envelope while migrating. Defaults to true. */
+  /** Temporarily accept the unversioned v1 envelope while migrating. Defaults to false. */
   allowLegacyDecrypt?: boolean;
 }
 
@@ -223,7 +223,7 @@ export class KmsEncryptionPlugin extends BasePlugin {
     if (!framed && data.readUInt8(0) === MAGIC.readUInt8(0)) {
       throw new Error('[PipeX] KMS Decryption: incomplete framed header');
     }
-    if (!framed && this.options.allowLegacyDecrypt === false) {
+    if (!framed && this.options.allowLegacyDecrypt !== true) {
       throw new Error('[PipeX] KMS Decryption: legacy format disabled');
     }
 
