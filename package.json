@@ -35,7 +35,8 @@
     "lint:ci": "node scripts/lint-ci.mjs",
     "typecheck:ci": "tsc -p tsconfig.ci-types.json --noEmit",
     "test:vitest": "vitest run",
-    "coverage:vitest": "vitest run --coverage"
+    "coverage:vitest": "vitest run --coverage",
+    "test:examples": "node scripts/verify-examples.mjs"
   },
   "keywords": [
     "data-transformation",
