@@ -12,7 +12,7 @@ pipeline {
   }
 
   parameters {
-    string(name: 'CONFIRM_RELEASE', defaultValue: '', description: 'Enter PUBLISH <name>@<version> using package.json')
+    string(name: 'CONFIRM_RELEASE', defaultValue: '', description: 'Confirm staging the verified release candidate: PUBLISH <name>@<version>')
   }
 
   environment {
@@ -50,6 +50,7 @@ pipeline {
     stage('Resolve and confirm package release') {
       steps {
         script {
+          env.RELEASE_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
           env.RELEASE_NAME = sh(script: "mise exec node@24 -- node -p \"require('./package.json').name\"", returnStdout: true).trim()
           env.RELEASE_VERSION = sh(script: "mise exec node@24 -- node -p \"require('./package.json').version\"", returnStdout: true).trim()
           if (!(env.RELEASE_NAME ==~ /^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/)) {
@@ -114,13 +115,13 @@ pipeline {
     stage('Second maintainer approval') {
       steps {
         script {
-          input message: "Publish locally built and verified ${env.RELEASE_NAME}@${env.RELEASE_VERSION} (commit ${env.GIT_COMMIT}) to npm? Only trusted release maintainers may approve.",
-            ok: 'Publish verified npm tarball'
+          input message: "Stage verified ${env.RELEASE_NAME}@${env.RELEASE_VERSION} (commit ${env.RELEASE_COMMIT}) on npm? A separate npm 2FA approval is required before public release.",
+            ok: 'Stage verified npm tarball'
         }
       }
     }
 
-    stage('Publish exact candidate to npm') {
+    stage('Stage exact candidate on npm') {
       steps {
         // This item/folder-scoped credential must be inaccessible to all PR jobs.
         withCredentials([string(credentialsId: 'pipex-npm-publish-token', variable: 'NPM_TOKEN')]) {
@@ -134,9 +135,9 @@ pipeline {
             unset NPM_TOKEN
             export NPM_CONFIG_USERCONFIG="$CONFIG"
             sha256sum -c .artifacts/sha256.txt
-            # npm stage publish requires an existing package; the first
-            # public release uses an authorized direct-publish granular token.
-            mise exec node@24 -- npm publish .artifacts/${RELEASE_ARCHIVE} \
+            # Stage-only token: no direct publication and no 2FA bypass.
+            # Works for first-time scoped packages; npm creates a placeholder until approval.
+            mise exec node@24 -- npm stage publish .artifacts/${RELEASE_ARCHIVE} \
               --access public --ignore-scripts --registry=https://registry.npmjs.org/
           '''
         }
