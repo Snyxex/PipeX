@@ -50,12 +50,37 @@ const result = spawnSync(process.execPath, [
   windowsHide: true,
 });
 
-// Publish only bounded, redacted diagnostics; full output remains in Jenkins.
+// Node's JUnit reporter emits <testsuites><testcase .../></testsuites> without
+// a <testsuite> wrapper. Jenkins expects the standard suite structure; missing
+// suites can lead to misleading result counts or an UNSTABLE job.
 if (reportFile) {
   let xml = await readFile(reportFile, 'utf8');
-  xml = xml.replace(/<failure\b[^>]*>[\s\S]*?<\/failure>/g, '<failure message="Test failed; see Jenkins for sanitized diagnostic context" />');
-  xml = xml.replace(/<failure\b[^>]*\/>/g, '<failure message="Test failed; see Jenkins for sanitized diagnostic context" />');
-  xml = xml.replace(/<system-(?:out|err)\b[^>]*>[\s\S]*?<\/system-(?:out|err)>/g, '');
+  // Never forward raw failure payloads, stack traces or attribute values.
+  // The failure category is derived only from a fixed allowlist.
+  const safeCategory = type => ({
+    testCodeFailure: 'Test assertion failed',
+    hookFailed: 'Test setup or teardown failed',
+    cancelledByParent: 'Test cancelled by parent',
+    testTimeoutFailure: 'Test exceeded its timeout',
+  })[type] ?? 'Test execution failed';
+  let failureCount = 0;
+  xml = xml.replace(/<testcase\\b([^>]*?)>/g, (tag, attrs) => {
+    if (!/\\sfailure=/.test(attrs)) return tag;
+    failureCount++;
+    return '<testcase' + attrs.replace(/\\s+failure="[^"]*"/g, '') + '>';
+  });
+  xml = xml.replace(/<failure\\b([^>]*)>([\\s\\S]*?)<\\/failure>/g, (_tag, attrs) => {
+    const type = /\\btype="([a-zA-Z]+)"/.exec(attrs)?.[1] ?? '';
+    const category = safeCategory(type);
+    return '<failure type="sanitized" message="' + category + '. Open the restricted Jenkins log for details." />';
+  });
+  xml = xml.replace(/<failure\\b[^>]*\\/>/g, '<failure type="sanitized" message="Test execution failed. Open the restricted Jenkins log for details." />');
+  xml = xml.replace(/<system-(?:out|err)\\b[^>]*>[\\s\\S]*?<\\/system-(?:out|err)>/g, '');
+  const suiteName = basename(inputs[0]).replace(/[^a-zA-Z0-9_-]/g, '-');
+  const testCount = (xml.match(/<testcase\\b/g) ?? []).length;
+  const totalFailures = Math.max(failureCount, (xml.match(/<failure\\b/g) ?? []).length);
+  xml = xml.replace('<testsuites>', '<testsuites><testsuite name="PipeX-' + suiteName + '" tests="' + testCount + '" failures="' + totalFailures + '" errors="0">');
+  xml = xml.replace('</testsuites>', '</testsuite></testsuites>');
   await writeFile(reportFile, xml);
 }
 if (result.error) throw result.error;
