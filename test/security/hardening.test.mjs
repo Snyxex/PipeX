@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { BasePlugin, DataEngine, EncryptionPlugin, HashingPlugin, CompressionPlugin, UnsupportedReverseError } from '../../dist/index.mjs';
+import { BasePlugin, DataEngine, EncryptionPlugin, HashingPlugin, CompressionPlugin, CompressionError, UnsupportedReverseError } from '../../dist/index.mjs';
 
 const collect = async (stream) => {
   const chunks = [];
@@ -178,7 +178,11 @@ const collect = async (stream) => {
 
 // Binary compression uses asynchronous zlib work and preserves round trips.
 {
-  assert.throws(() => new CompressionPlugin({ type: 'gzip', level: 10 }), /gzip level/);
+  assert.throws(() => new CompressionPlugin({ type: 'gzip', level: 10 }), error => {
+    assert.ok(error instanceof CompressionError);
+    assert.equal(error.code, 'COMPRESSION_FAILED');
+    return true;
+  });
   const source = randomBytes(8 * 1024 * 1024);
   const plugin = new CompressionPlugin({ type: 'brotli', level: 4 });
   const order = [];
@@ -200,7 +204,11 @@ const collect = async (stream) => {
   assert.deepEqual(restored, source);
   await assert.rejects(
     pipeline(Readable.from([]), plugin.createStream('decompress'), new Writable({ write(_chunk, _encoding, callback) { callback(); } })),
-    /packet too short/,
+    error => {
+      assert.ok(error instanceof CompressionError);
+      assert.equal(error.code, 'COMPRESSION_FAILED');
+      return true;
+    },
   );
 }
 
