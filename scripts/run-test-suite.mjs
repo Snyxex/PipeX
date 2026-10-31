@@ -46,6 +46,10 @@ const result = spawnSync(process.execPath, [
   ...(reportFile ? ['--test-reporter=spec', '--test-reporter=junit', '--test-reporter-destination=stdout', `--test-reporter-destination=${reportFile}`] : []),
   ...files,
 ], {
+  // The tooling suite launches nested runner fixtures that intentionally fail.
+  // Do not let those child processes inherit the outer Jenkins report folder:
+  // their fixture failures are expected, not failures of the parent test suite.
+  env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'PIPEX_JUNIT_DIR')),
   stdio: 'inherit',
   windowsHide: true,
 });
