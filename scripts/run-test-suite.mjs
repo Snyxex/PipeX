@@ -64,20 +64,20 @@ if (reportFile) {
     testTimeoutFailure: 'Test exceeded its timeout',
   })[type] ?? 'Test execution failed';
   let failureCount = 0;
-  xml = xml.replace(/<testcase\\b([^>]*?)>/g, (tag, attrs) => {
-    if (!/\\sfailure=/.test(attrs)) return tag;
+  xml = xml.replace(/<testcase\b([^>]*?)>/g, (tag, attrs) => {
+    if (!/\sfailure=/.test(attrs)) return tag;
     failureCount++;
-    return '<testcase' + attrs.replace(/\\s+failure="[^"]*"/g, '') + '>';
+    return '<testcase' + attrs.replace(/\s+failure="[^"]*"/g, '') + '>';
   });
-  xml = xml.replace(/<failure\\b([^>]*)>([\\s\\S]*?)<\\/failure>/g, (_tag, attrs) => {
-    const type = /\\btype="([a-zA-Z]+)"/.exec(attrs)?.[1] ?? '';
+  xml = xml.replace(/<failure\b([^>]*)>([\s\S]*?)<\/failure>/g, (_tag, attrs) => {
+    const type = /\btype="([a-zA-Z]+)"/.exec(attrs)?.[1] ?? '';
     const category = safeCategory(type);
     return '<failure type="sanitized" message="' + category + '. Open the restricted Jenkins log for details." />';
   });
-  xml = xml.replace(/<system-(?:out|err)\\b[^>]*>[\\s\\S]*?<\\/system-(?:out|err)>/g, '');
+  xml = xml.replace(/<system-(?:out|err)\b[^>]*>[\s\S]*?<\/system-(?:out|err)>/g, '');
   const suiteName = basename(inputs[0]).replace(/[^a-zA-Z0-9_-]/g, '-');
-  const testCount = (xml.match(/<testcase\\b/g) ?? []).length;
-  const totalFailures = Math.max(failureCount, (xml.match(/<failure\\b/g) ?? []).length);
+  const testCount = (xml.match(/<testcase\b/g) ?? []).length;
+  const totalFailures = Math.max(failureCount, (xml.match(/<failure\b/g) ?? []).length);
   xml = xml.replace('<testsuites>', '<testsuites><testsuite name="PipeX-' + suiteName + '" tests="' + testCount + '" failures="' + totalFailures + '" errors="0">');
   xml = xml.replace('</testsuites>', '</testsuite></testsuites>');
   await writeFile(reportFile, xml);
