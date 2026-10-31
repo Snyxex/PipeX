@@ -107,7 +107,7 @@ test('legacy encrypted records are rejected by default but explicitly migratable
 test('KMS envelopes verify their tags and report sanitized failures', async () => {
   const dataKey = Buffer.alloc(32, 0x41);
   const provider = {
-    async generateDataKey() { return { plaintext: Buffer.from(dataKey), ciphertext: Buffer.from('wrapped-key'); }; },
+    async generateDataKey() { return { plaintext: Buffer.from(dataKey), ciphertext: Buffer.from('wrapped-key') }; },
     async decrypt() { return Buffer.from(dataKey); },
   };
   const engine = new DataEngine().use(new KmsEncryptionPlugin({ kms: provider, keyId: 'test-key' }));
