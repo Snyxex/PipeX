@@ -1,23 +1,31 @@
 name: Feature request
-description: Suggest an improvement consistent with PipeX's scope
+description: Propose an API or data-pipeline improvement
 title: "feat: "
+labels: ["enhancement"]
 body:
-  - type: textarea
-    id: problem
+  - type: markdown
     attributes:
-      label: Problem or use case
-      description: What problem would this solve?
+      value: "Keep proposals within PipeX's data-transformation scope. Do not include secrets or security vulnerability details."
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Problem and use case
+      description: Describe what users need to accomplish.
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed behavior
-      description: Explain the API or behavior, alternatives and compatibility concerns.
+      label: Proposed API or behavior
+      description: Include sanitized sample code and compatibility considerations.
     validations:
       required: true
   - type: textarea
-    id: constraints
+    id: alternatives
     attributes:
-      label: Constraints
-      description: Mention security, stream backpressure, file boundaries or performance impacts.
+      label: Alternatives considered
+  - type: textarea
+    id: concerns
+    attributes:
+      label: Compatibility, performance and security impact
+      description: Consider ESM/CJS, streams, backpressure, cancellation, resource limits and key handling.

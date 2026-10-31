@@ -1,40 +1,46 @@
 name: Bug report
-description: Report a reproducible PipeX defect (not a security vulnerability)
+description: Report a reproducible PipeX defect; never disclose vulnerabilities here
 title: "bug: "
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
-      value: "For security-sensitive findings, use the private reporting instructions in SECURITY.md instead of opening a public issue."
-  - type: textarea
-    id: description
-    attributes:
-      label: What happened?
-      description: Explain the observed behavior and what you expected.
-    validations:
-      required: true
-  - type: textarea
-    id: reproduce
-    attributes:
-      label: Reproduction
-      description: Provide minimal sanitized code or steps, without real credentials or private data.
-    validations:
-      required: true
+      value: "Before posting, remove credentials, personal data and private hostnames. Report security vulnerabilities privately: https://github.com/Snyxex/PipeX/security/advisories/new (see SECURITY.md)."
   - type: input
     id: version
     attributes:
       label: PipeX version or commit
-      placeholder: 1.0.1
+      placeholder: "@snyxex/pipex@1.0.2"
     validations:
       required: true
   - type: input
     id: environment
     attributes:
       label: Runtime and platform
-      placeholder: Node.js 24.x on Linux
+      placeholder: "Node.js 24.x, npm 11, Linux x64"
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Include sanitized steps or code with synthetic data only.
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Sanitized logs
-      description: Remove all secrets, access tokens and personal information before posting.
+      label: Sanitized logs or stack traces
+      description: Redact secrets, keys, real payloads, names and internal service URLs.

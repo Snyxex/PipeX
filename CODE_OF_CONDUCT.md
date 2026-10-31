@@ -1,17 +1,19 @@
 # Code of Conduct
 
-## Our standards
+## Commitment
 
-People participating in PipeX discussions, issue reports, code review, and related community spaces are expected to act respectfully and professionally.
+PipeX contributors and maintainers are expected to provide a professional, respectful and inclusive environment, regardless of background or level of experience. Focus technical criticism on ideas and behavior, not people.
 
-Examples of constructive conduct include welcoming contributions, giving actionable technical feedback, respecting different experience levels, and focusing criticism on work rather than people.
+## Expected behavior
 
-Harassment, discrimination, threats, stalking, deliberate disruption, doxxing, and publication of others' private information are not acceptable.
+Be considerate, give actionable feedback, respect differing viewpoints, acknowledge mistakes and protect other people's personal information. Do not harass, discriminate against, threaten, intimidate, stalk, dox or deliberately disrupt participants. Sexual harassment and disclosure of private correspondence or sensitive data without permission are prohibited.
 
 ## Scope and enforcement
 
-This code applies to project-managed community spaces and conduct representing the project. Maintainers may edit or remove inappropriate content, restrict participation, or block accounts when necessary. Enforcement is based on the severity and circumstances of each incident.
+These standards apply to project-managed issues, pull requests, reviews and other spaces, as well as public representation of the project. Maintainers may moderate comments, request changes, temporarily restrict participation or ban participants based on the circumstances and severity of misconduct. Retaliation against someone reporting a concern in good faith is prohibited.
 
-To report misconduct, request a confidential contact channel from the maintainer via a minimal GitHub issue **without naming people or including sensitive details**. If an appropriate private contact is already available through the maintainer's public profile, you may use that instead. Do not publish sensitive personal information. For software vulnerabilities, follow [SECURITY.md](SECURITY.md) instead.
+## Reporting
 
-Maintainers will consider reports as discreetly as reasonably possible, though they cannot promise complete confidentiality. Deliberately false reports or retaliation against good-faith reporters are also unacceptable.
+For conduct concerns, contact a project maintainer through a **private contact option on their GitHub profile**, where one is available. If no private route is available, use a public issue only to request a private contact mechanism; **do not include names, allegations or confidential details** in that issue. Maintainers will assess reports as discreetly as reasonably possible; confidentiality and response times cannot be guaranteed.
+
+For **software security vulnerabilities**, instead use the separate private mechanism described in [SECURITY.md](SECURITY.md). Do not post a vulnerability in a conduct report or public issue.

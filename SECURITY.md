@@ -1,41 +1,33 @@
 # Security Policy
 
-PipeX handles potentially sensitive application data and includes cryptographic, file-system, and streaming operations. Security reports are taken seriously.
+PipeX handles potentially sensitive binary data, streams and cryptographic operations. Please report vulnerabilities privately, not through public issues or pull requests.
 
-## Supported versions
+## Private vulnerability reporting
 
-| Version | Security fixes |
+**Preferred channel:** [Submit a private GitHub Security Advisory report](https://github.com/Snyxex/PipeX/security/advisories/new).
+
+This page is the intended confidential reporting route **when GitHub private vulnerability reporting is enabled**. If the form is not available, use an existing private contact channel with a repository maintainer (for example, a private contact option shown on the maintainer's GitHub profile). If no such option exists, open a public issue **only to request a private channel**; never put exploit details, proof of concept, credentials or sensitive data in that request. The maintainer must enable GitHub private vulnerability reporting for the advisory submission flow to work.
+
+A useful confidential report includes impacted versions, runtime/environment, impact, minimal reproducible steps using synthetic data, expected versus actual results and any mitigation. Do not include live credentials or third-party private information.
+
+Maintainers will assess reports on a best-effort basis, coordinate a fix and disclosure with the reporter and issue a GitHub Security Advisory when appropriate. No guaranteed SLA or bounty is offered. Please allow coordination before publication.
+
+## Supported releases
+
+| Release | Security maintenance |
 | --- | --- |
-| `main` | Active development and security fixes |
-| Latest stable 1.0.x release | Best-effort fixes for verified vulnerabilities |
-| Older releases | No guaranteed backports |
+| `main` | Active development and security patches |
+| Latest stable `1.0.x` | Best-effort updates for confirmed issues |
+| Older versions | No guaranteed backports |
 
-Use the latest maintained version. Supported Node.js major versions are 22, 24, and 26; the minimum declared runtime version is Node.js 22.
+Node.js 22, 24 and 26 are the project's CI targets; Node.js 22 is the minimum package runtime.
 
-## Report a vulnerability privately
+## Security practices
 
-**Do not create a public issue, discussion, or pull request containing an undisclosed vulnerability, exploit, credential, or personal information.**
-
-**Responsible-disclosure contact:** [GitHub private vulnerability report for PipeX](https://github.com/Snyxex/PipeX/security/advisories/new), when private reporting is enabled for the repository. This is the preferred secure submission channel. If that form is unavailable, open a public issue requesting a private reporting channel **without including technical vulnerability details**, and wait for a secure route before submitting the report.
-
-A useful report includes the affected versions and environment, impact, concise reproduction steps or a proof of concept, and mitigations if known. Do not submit real user data, production secrets, or live credentials.
-
-Maintainers will triage reports on a best-effort basis, coordinate remediation and disclosure with reporters, and publish a GitHub Security Advisory when appropriate. No guaranteed response or patch SLA is offered. Please allow time for a fix before public disclosure.
-
-If you discover exposed credentials, treat them as compromised: revoke or rotate them at their provider immediately. Removing a file in a new commit does not remove it from Git history.
-
-## Security boundaries
-
-- `binary.pack()`, `binary.unpack()`, and the stream/file pack/unpack APIs are serialization, **not encryption**.
-- Encrypted data should use authenticated encryption with properly generated, managed keys; never commit keys.
-- Treat data and metadata received from another system as untrusted. Supply the expected result type from trusted application logic when undoing remotely sourced binary results.
-- File operations require an application-controlled `allowedRoot`. Keep allowed roots writable only by trusted principals.
-- Set appropriate size, concurrency, timeout, and framing limits; handle cancellation and stream backpressure.
-- `dlq` / `setDlq()` are caller-owned failure sinks, not persistent replay or a queue.
-- Consult [the encryption threat model and key-management guidance](docs/security.md), [enterprise security guidance](docs/enterprise.md), and [encryption migration guidance](docs/encryption-v4-migration.md).
-
-## Supply-chain practices
-
-Jenkins is the only project CI system; no GitHub Actions workflow is used. Pull requests with untrusted code must not receive credentials or privileged shared-host access. Release credentials must be isolated from ordinary CI builds.
-
-The history review and its limitations are recorded in [docs/security-history-review.md](docs/security-history-review.md). A regex review does **not** certify the repository or its full Git object database as secret-free.
+- Treat all remote input and metadata as untrusted. Serialization and encryption are different operations.
+- Use authenticated encryption, securely generated keys and trusted key management; do not store secrets in source code or example fixtures.
+- Set limits for input/output, frames, concurrency and timeouts; preserve backpressure and cancellation.
+- Restrict file operations to an application-controlled `allowedRoot`; handle symbolic links and filesystem races carefully.
+- Jenkins is the only CI system. Do not expose privileged CI agents or npm publishing credentials to untrusted PR code.
+- If a secret is exposed, **revoke or rotate it immediately**. Deleting a file or adding an ignore rule does not remove the secret from prior commits.
+- See [security guidance](docs/security.md), [enterprise guidance](docs/enterprise.md) and [history-review limitations](docs/security-history-review.md). A keyword or regex scan does not prove the complete Git object history is secret-free.
