@@ -14,7 +14,7 @@ pipeline {
   parameters {
     string(name: 'EXPECTED_COMMIT', defaultValue: '', description: 'Reviewed main commit (40-character SHA)')
     string(name: 'EXPECTED_SHA256', defaultValue: '', description: 'SHA-256 of the reviewed release-check tarball')
-    string(name: 'CONFIRM_RELEASE', defaultValue: '', description: 'Enter PUBLISH @snyxex/pipex@1.0.2')
+    string(name: 'CONFIRM_RELEASE', defaultValue: '', description: 'Enter PUBLISH <name>@<version> using package.json')
   }
 
   environment {
@@ -29,9 +29,6 @@ pipeline {
         script {
           if (env.CHANGE_ID?.trim() || env.CHANGE_FORK?.trim()) {
             error('npm publication from PRs or forks is prohibited.')
-          }
-          if (params.CONFIRM_RELEASE != 'PUBLISH @snyxex/pipex@1.0.2') {
-            error('Explicit release confirmation is required.')
           }
           if (!(params.EXPECTED_COMMIT ==~ /^[a-f0-9]{40}$/)) {
             error('Expected reviewed 40-character Git commit SHA.')
@@ -58,8 +55,32 @@ pipeline {
             echo 'Reviewed commit SHA mismatch.' >&2
             exit 2
           }
+        '''
+      }
+    }
+
+    stage('Resolve and confirm package release') {
+      steps {
+        script {
+          def pkg = new groovy.json.JsonSlurperClassic().parseText(readFile('package.json'))
+          env.RELEASE_NAME = pkg.name
+          env.RELEASE_VERSION = pkg.version
+          if (!(env.RELEASE_NAME ==~ /^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/)) {
+            error('Invalid scoped npm package name in package.json')
+          }
+          if (!(env.RELEASE_VERSION ==~ /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/)) {
+            error('Invalid release version in package.json')
+          }
+          env.RELEASE_ARCHIVE = 'snyxex-pipex-' + env.RELEASE_VERSION + '.tgz'
+          if (params.CONFIRM_RELEASE != "PUBLISH ${env.RELEASE_NAME}@${env.RELEASE_VERSION}") {
+            error("Explicit confirmation must exactly match PUBLISH ${env.RELEASE_NAME}@${env.RELEASE_VERSION}")
+          }
+          echo "Approved release target: ${env.RELEASE_NAME}@${env.RELEASE_VERSION}"
+        }
+        sh '''
+          set -eu
           mise exec node@24 -- node scripts/release-preflight.mjs \
-            --name @snyxex/pipex --version 1.0.2 --online
+            --name "$RELEASE_NAME" --version "$RELEASE_VERSION" --online
         '''
       }
     }
@@ -76,7 +97,7 @@ pipeline {
             git fetch --unshallow origin
           fi
           git fetch --force --tags origin '+refs/heads/*:refs/remotes/origin/*'
-          gitleaks git --source . --redact --log-opts='--all' --exit-code 1
+          gitleaks git --redact --log-opts='--all' --exit-code 1
         '''
       }
     }
@@ -92,13 +113,13 @@ pipeline {
             npm audit --audit-level=high
             mkdir -p .artifacts
             npm pack --ignore-scripts --pack-destination .artifacts
-            test -f .artifacts/snyxex-pipex-1.0.2.tgz
+            test -f .artifacts/${RELEASE_ARCHIVE}
             npm exec -- node scripts/verify-packed-consumer.mjs
           '
-          printf '%s  %s\n' "$EXPECTED_SHA256" '.artifacts/snyxex-pipex-1.0.2.tgz' |
+          printf '%s  %s\n' "$EXPECTED_SHA256" ".artifacts/${RELEASE_ARCHIVE}" |
             sha256sum -c -
-          sha256sum .artifacts/snyxex-pipex-1.0.2.tgz > .artifacts/sha256.txt
-          tar -tzf .artifacts/snyxex-pipex-1.0.2.tgz > .artifacts/contents.txt
+          sha256sum .artifacts/${RELEASE_ARCHIVE} > .artifacts/sha256.txt
+          tar -tzf .artifacts/${RELEASE_ARCHIVE} > .artifacts/contents.txt
         '''
         archiveArtifacts artifacts: '.artifacts/sha256.txt,.artifacts/contents.txt', fingerprint: true
       }
@@ -106,8 +127,10 @@ pipeline {
 
     stage('Second maintainer approval') {
       steps {
-        input message: 'Publish verified @snyxex/pipex@1.0.2 to npm? Only trusted release maintainers may approve.',
-          ok: 'Publish verified npm tarball'
+        script {
+          input message: "Publish verified ${env.RELEASE_NAME}@${env.RELEASE_VERSION} to npm? Only trusted release maintainers may approve.",
+            ok: 'Publish verified npm tarball'
+        }
       }
     }
 
@@ -124,11 +147,11 @@ pipeline {
             printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$CONFIG"
             unset NPM_TOKEN
             export NPM_CONFIG_USERCONFIG="$CONFIG"
-            printf '%s  %s\n' "$EXPECTED_SHA256" '.artifacts/snyxex-pipex-1.0.2.tgz' |
+            printf '%s  %s\n' "$EXPECTED_SHA256" ".artifacts/${RELEASE_ARCHIVE}" |
               sha256sum -c -
             # npm stage publish requires an existing package; the first
             # public release uses an authorized direct-publish granular token.
-            mise exec node@24 -- npm publish .artifacts/snyxex-pipex-1.0.2.tgz \
+            mise exec node@24 -- npm publish .artifacts/${RELEASE_ARCHIVE} \
               --access public --ignore-scripts --registry=https://registry.npmjs.org/
           '''
         }
