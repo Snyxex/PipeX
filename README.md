@@ -178,7 +178,7 @@ engine.setLogger(logger).setAuditLogger(auditLogger).on('error', (error, request
 });
 ```
 
-See [Architecture](./docs/architecture.md) and [Production operations](./docs/enterprise.md).
+See [Architecture](./docs/architecture.md), [Production operations](./docs/enterprise.md), and [Encryption security and threat model](./docs/security.md).
 
 ## Development
 
