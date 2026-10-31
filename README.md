@@ -1,167 +1,283 @@
 # PipeX
 
-**Composable data processing for Node.js — secure, streaming, and extensible.**
+PipeX composes compression, authenticated encryption, and HMAC integrity checks into reversible data-processing pipelines for Node.js buffers, files, and streams.
 
-PipeX is a TypeScript-first data-transformation engine for applications that need to serialize, compress, encrypt, validate, and process data without tying those operations to a specific transport or storage provider. Configure a pipeline once, then use it with in-memory values, files, or Node.js streams.
+[![npm version](https://img.shields.io/npm/v/@snyxex/pipex)](https://www.npmjs.com/package/@snyxex/pipex)
+[![license](https://img.shields.io/github/license/Snyxex/PipeX)](https://github.com/Snyxex/PipeX/blob/main/LICENSE)
+[![CI](https://img.shields.io/badge/CI-Jenkins-informational)](https://github.com/Snyxex/PipeX/commits/main/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-types-included-blue)](https://github.com/Snyxex/PipeX/blob/main/package.json)
+[![npm package size](https://img.shields.io/npm/unpacked-size/@snyxex/pipex)](https://www.npmjs.com/package/@snyxex/pipex)
 
-Built for backend services, data pipelines, internal tooling, and systems that exchange or persist binary payloads.
+## Installation
 
-## Highlights
-
-- **Composable plugins:** Combine compression, authenticated encryption, HMAC integrity, validation, benchmarking, and your own processors.
-- **Three data interfaces:** Work with objects and buffers, files, or streams using one configured engine.
-- **Streaming with backpressure:** Process large inputs without treating every payload as a single in-memory buffer.
-- **Security-oriented defaults:** Authenticated encryption, bounded inputs and frames, timeouts, cancellation, and explicit decoding controls.
-- **Operational visibility:** Structured logging, tracing, audit hooks, progress notifications, bounded retries, and a caller-supplied failure sink.
-- **Extensible runtime:** Custom plugins, configuration-based pipelines, local worker pools, and application-provided KMS adapters.
-- **Typed ESM package:** TypeScript declarations and support for Node.js 22, 24, and 26.
-
-PipeX is a **processing engine**, not a message broker, database, object store, or network transport. You control where data comes from, where it goes, and how it is retained.
-
-## Install
-
-```bash
+```sh
 npm install @snyxex/pipex
 ```
 
-**Requirements:** Node.js 22 or newer; ESM.
+Requires **Node.js 22 or newer** and ESM. PipeX uses Node.js streams, cryptography, and filesystem facilities; it does not provide a browser build. Jenkins tests Node.js 22, 24, and 26.
 
+## Quick Start
 
-## Quick start
+This in-memory example requires no native filesystem bindings.
+
+```ts
+import { DataEngine, CompressionPlugin } from '@snyxex/pipex';
+
+const engine = new DataEngine().use(
+  new CompressionPlugin({ type: 'gzip', level: 6 }),
+);
+
+const encoded = await engine.binary.run({ id: 42, status: 'ready' });
+const original = await engine.binary.undo<{ id: number; status: string }>(encoded);
+
+console.log(original); // { id: 42, status: 'ready' }
+```
+
+## Core Concepts
+
+- **DataEngine:** Owns the configured plugin chain, resource limits, operation lifecycle, and binary/file/stream controllers.
+- **Controllers:** `engine.binary` processes in-memory values, `engine.file` works with paths under an allowed root, and `engine.stream` connects Node.js streams.
+- **Plugin:** Implements `process(Buffer, context)` and optionally `reverse` or `createStream`.
+- **Transformation:** Plugins run in registration order. Reverse transformations execute reversible plugins in the opposite order.
+- **Capabilities:** Query whether a plugin supports processing, reversal, or native/fallback streaming.
+- **Execution context:** Request-scoped metadata, cancellation signal, limits, and optional logging/tracing.
+- **Source and destination:** The input and output objects passed to the relevant controller; they are concepts, not exported PipeX classes.
+
+`pack()` and `unpack()` are **serialization-only** operations; they do not apply the transformation pipeline.
+
+## Transformation Examples
+
+### Compression
+
+```ts
+import { DataEngine, CompressionPlugin } from '@snyxex/pipex';
+
+const engine = new DataEngine().use(new CompressionPlugin({ type: 'brotli', level: 5 }));
+const result = await engine.binary.run('Repeated application data');
+console.log(await engine.binary.undo<string>(result));
+```
+
+Compression types: `gzip`, `brotli`, and `none`.
+
+### Encryption
 
 ```ts
 import { randomBytes } from 'node:crypto';
-import {
-  DataEngine,
-  CompressionPlugin,
-  EncryptionPlugin,
-} from '@snyxex/pipex';
+import { DataEngine, EncryptionPlugin } from '@snyxex/pipex';
 
-const engine = new DataEngine({
-  maxInputBytes: 64 * 1024 * 1024,
-  operationTimeoutMs: 30_000,
-})
-  .use(new CompressionPlugin({ type: 'gzip', level: 6 }))
-  .use(new EncryptionPlugin({
-    algorithm: 'aes-256-gcm',
-    key: randomBytes(32),
-  }));
+// Demonstration only: retain this key securely to decrypt persisted data.
+const key = randomBytes(32);
+const engine = new DataEngine().use(new EncryptionPlugin({
+  algorithm: 'aes-256-gcm',
+  key,
+  allowLegacyDecrypt: false,
+}));
 
-const encoded = await engine.binary.run({ id: 1, event: 'created' });
-const decoded = await engine.binary.undo(encoded);
+const encrypted = await engine.binary.run('confidential');
+const plaintext = await engine.binary.undo<string>(encrypted);
+console.log(plaintext);
 ```
 
-**Production note:** Keep encryption keys in your application's secret manager or KMS. Do not generate a new key per request when the data must be decryptable later.
+Alternative algorithm: `chacha20-poly1305`. Both require a 32-byte key.
 
-## How you can use PipeX
+### Hashing / HMAC integrity
 
-| Scenario | PipeX capability |
-| --- | --- |
-| Protect serialized application data | Compose compression and authenticated encryption for binary payloads |
-| Process files in backend services | Atomic file transformations with bounded streaming and file-system safeguards |
-| Transform Node.js streams | Apply plugin pipelines with backpressure, cancellation, and deadlines |
-| Exchange structured payloads | MessagePack serialization for supported object types |
-| Enforce application-specific rules | Register custom validation or processing plugins |
-| Run CPU-heavy local transforms | Bounded worker pools with queue controls and shutdown behavior |
-| Integrate production infrastructure | Add tracing, audit logging, custom KMS providers, and caller-owned failure sinks |
+```ts
+import { DataEngine, HashingPlugin } from '@snyxex/pipex';
 
-## One engine, multiple interfaces
+const engine = new DataEngine().use(new HashingPlugin({
+  algorithm: 'sha256',
+  secret: process.env.PIPEX_HMAC_SECRET ?? (() => { throw new Error('Missing HMAC key'); })(),
+}));
 
-| Interface | Operations | Purpose |
+const signed = await engine.binary.run('message');
+const verified = await engine.binary.undo<string>(signed);
+console.log(verified);
+```
+
+`HashingPlugin` **appends a keyed HMAC** and verifies it during reversal. It is not a standalone, one-way digest API. The secret must contain at least 16 characters; use a high-entropy secret in production.
+
+### Combined reversible pipeline
+
+```ts
+import { randomBytes } from 'node:crypto';
+import { DataEngine, CompressionPlugin, EncryptionPlugin, HashingPlugin } from '@snyxex/pipex';
+
+const encryptionKey = randomBytes(32);
+const hmacSecret = randomBytes(32).toString('hex');
+const engine = new DataEngine()
+  .use(new CompressionPlugin({ type: 'gzip', level: 6 }))
+  .use(new EncryptionPlugin({ algorithm: 'aes-256-gcm', key: encryptionKey }))
+  .use(new HashingPlugin({ algorithm: 'sha512', secret: hmacSecret }));
+
+const result = await engine.binary.run({ event: 'example' });
+const restored = await engine.binary.undo<{ event: string }>(result);
+console.log(restored);
+```
+
+Keep keys outside code and configuration repositories. The HMAC in this example is an optional additional integrity layer; authenticated encryption already authenticates encrypted data.
+
+## Data Interfaces
+
+| Controller | Use | Runtime considerations |
 | --- | --- | --- |
-| **Binary** | `binary.run()`, `binary.undo()` | Apply and reverse configured transforms on in-memory data |
-| **Files** | `file.process()`, `file.reverse()` | Transform files, with controlled output boundaries |
-| **Streams** | `stream.pipe()` | Transform Node.js byte streams with backpressure |
-| **Serialization** | `binary.pack()`, `binary.unpack()`, `file.pack()`, `file.unpack()`, `stream.pack()`, `stream.unpack()` | Encode and decode MessagePack without applying plugins |
+| `engine.binary` | Values and buffers held in memory | Does not load native file bindings |
+| `engine.file` | Files on disk | Uses Koffi-based native filesystem operations |
+| `engine.stream` | Large streams, pipes, sockets | Uses Node.js backpressure and supports `AbortSignal` |
 
-**Important:** `pack()` and `unpack()` perform serialization only. They do **not** compress, encrypt, or hash data.
+### Binary
 
-### Stream processing
+```ts
+const encoded = await engine.binary.run({ ok: true });
+const decoded = await engine.binary.undo(encoded);
+const serialized = engine.binary.pack({ ok: true });
+const parsed = engine.binary.unpack<{ ok: boolean }>(serialized);
+```
+
+For data reconstructed after transport or storage, supply a trusted `expectedType` to `undo`; never trust unverified type metadata.
+
+### Files
+
+```ts
+await engine.file.process('./data/source.bin', './data/source.px', './data');
+await engine.file.reverse('./data/source.px', './data/restored.bin', './data');
+```
+
+Output is staged and atomically replaced. Paths are restricted to `allowedRoot`; create the parent directories first.
+
+### Streams
 
 ```ts
 import { createReadStream, createWriteStream } from 'node:fs';
 
-const abort = new AbortController();
-
+const controller = new AbortController();
 await engine.stream.pipe(
-  createReadStream('./input.bin'),
-  createWriteStream('./output.pipex'),
+  createReadStream('./source.bin'),
+  createWriteStream('./output.px'),
   false,
-  { signal: abort.signal, timeoutMs: 30_000 },
+  { signal: controller.signal, timeoutMs: 30_000 },
 );
 ```
 
-### File processing
+The `reverse` argument is `true` when decoding. Serialization-only stream adapters are `engine.stream.pack()` and `engine.stream.unpack()`.
+
+## Plugins
+
+### Built-in plugins
+
+| Plugin | Purpose | Notes |
+| --- | --- | --- |
+| `CompressionPlugin` | Gzip/Brotli transformations | Reversible; native streaming |
+| `EncryptionPlugin` | AES-256-GCM / ChaCha20-Poly1305 | Reversible authenticated frames |
+| `HashingPlugin` | HMAC-SHA-256 / HMAC-SHA-512 | Appends and verifies a keyed digest |
+| `BenchmarkPlugin` | Processing metrics | Observes transformation timings |
+| `ValidationPlugin` | Application schema validation | Integrates Zod |
+| `WorkerPoolPlugin` | Caller-supplied worker module transforms | Opt-in local Piscina pool |
+| `KmsEncryptionPlugin` | Envelope encryption using caller-supplied KMS | Binary-only; needs KMS provider |
+
+The `Plugins` object exposes these constructors under their shortened names, e.g. `Plugins.Compression`.
+
+### Plugin lifecycle
+
+Register with `engine.use(plugin)` in the intended order, or use `DataEngine.fromConfig()` with registered plugin names. Third-party plugins may implement `ProcessorPlugin` or extend `BasePlugin`. Registration validates capability declarations; pipeline configuration cannot change during an active operation. Reverse operations reject pipelines containing non-reversible plugins rather than silently skipping a step.
+
+Read [the full API reference](docs/api.md) for the plugin contract, constructor options, and error types.
+
+## Streaming & Backpressure
+
+`stream.pipe(source, destination, reverse?, options?)` connects a source to the configured transform chain and destination, awaiting completion. Node.js backpressure propagates across native stream plugins. `stream.into(destination)` and `stream.reverseInto(destination)` expose writable adapters for use with Node.js pipelines.
+
+Plugins lacking `createStream()` use a per-chunk fallback **only when chunk independence is valid**. Such a fallback is not suitable for algorithms requiring whole-message authentication or global framing.
+
+Authenticated encryption emits bounded frames, each verified before its plaintext is released. Previously authenticated frames can already have been consumed if a later frame or final marker fails: **treat successful stream completion as the transaction commit point**. HMAC verification, unlike per-frame AEAD, withholds complete bounded plaintext until its final digest verifies.
+
+Cancellation uses `AbortSignal`; operation limits and deadlines apply to stream processing.
+
+## API Reference
+
+See **[docs/api.md](docs/api.md)** for public entry points, signatures, options, return values, error classes, and serialization semantics.
+
+Primary operations:
 
 ```ts
-await engine.file.process(
-  './data/input.bin',
-  './data/input.pipex',
-  './data',
-  { timeoutMs: 60_000 },
-);
-
-await engine.file.reverse(
-  './data/input.pipex',
-  './data/restored.bin',
-  './data',
-);
+new DataEngine(limits?)
+DataEngine.fromConfig(config)
+engine.use(plugin)
+engine.binary.run(input, options?)
+engine.binary.undo(result, options?)
+engine.binary.pack(data)
+engine.binary.unpack(buffer)
+engine.file.process(inputPath, outputPath, allowedRoot?, options?)
+engine.file.reverse(inputPath, outputPath, allowedRoot?, options?)
+engine.stream.pipe(source, destination, reverse?, options?)
 ```
 
-The final root argument defines the permitted file-system boundary. PipeX checks traversal and link conditions and uses atomic output replacement; keep the root under the service account's control.
+## Security
 
-## Plugins and configuration
+**Hashing is not encryption.** HMAC detects unauthorized modification when its key remains secret; it does not conceal contents. Authenticated encryption provides confidentiality and integrity. Complete-message integrity for framed encrypted streams is confirmed only after the final authenticated frame and successful completion.
 
-Built-in plugin families include compression, encryption, hashing, validation, benchmarking, KMS encryption, and local worker pools. Add your own plugin with `BasePlugin`, or register it for configuration-driven pipelines.
+- **Encryption:** AES-256-GCM and ChaCha20-Poly1305 with 32-byte keys; authenticated framing uses the `PXAE` v4 format.
+- **Authentication tags:** A frame is not emitted as plaintext until its AEAD tag verifies. Sequence numbers and a final authenticated frame detect reordering, duplication, and truncation.
+- **Key handling:** Supply keys through a secret manager or application-managed KMS. PipeX is not a key vault. Do not reuse a randomly generated per-process key for data requiring later decryption.
+- **HMAC:** SHA-256 or SHA-512 with a caller-owned secret. A mismatched or truncated digest rejects reversal.
+- **Limits:** Input, output, frame, concurrency, and timeout limits protect the host; configure them for the deployment.
+- **KMS:** External providers are supplied by the application; the KMS plugin is binary-only and requires a working `generateDataKey` capability.
+
+**Compatibility:** Version 4 encryption writes framed `PXAE` only. Reading legacy unversioned v3 encrypted data is a temporary migration option (`allowLegacyDecrypt`, default `true`); disable it after migration. Format compatibility is not a promise that all future versions or arbitrary plugin combinations can read every older payload. Keep original plugin configuration and secrets where reversibility is required.
+
+See [Encryption migration](docs/encryption-v4-migration.md) and [Production security](docs/enterprise.md).
+
+## Error Handling
+
+Operations reject on invalid configuration, unsupported reverse/stream operations, resource-limit violations, authentication failures, aborted operations, timeouts, and underlying stream/filesystem errors. Typed errors include `PipeXError`, `UnsupportedReverseError`, `UnsupportedStreamingError`, `OperationAbortedError`, `OperationTimeoutError`, and worker/KMS errors. Check `error.code` on `PipeXError` when branching on supported classifications; other errors may be ordinary `Error` instances.
 
 ```ts
-import { BasePlugin, DataEngine } from '@snyxex/pipex';
+import { OperationTimeoutError } from '@snyxex/pipex';
 
-class PrefixPlugin extends BasePlugin {
-  readonly name = 'prefix';
-  readonly version = '1.0.0';
-
-  process(data: Buffer): Buffer {
-    return Buffer.concat([Buffer.from('PX:'), data]);
-  }
-
-  reverse(data: Buffer): Buffer {
-    return data.subarray(3);
+try {
+  await engine.binary.run('data', { timeoutMs: 1000 });
+} catch (error) {
+  if (error instanceof OperationTimeoutError) {
+    console.error('Transformation timed out');
+  } else {
+    throw error;
   }
 }
-
-const customEngine = new DataEngine().use(new PrefixPlugin());
 ```
 
-For stream use, chunk-based custom plugins must be independently safe on every chunk. Implement a framed stream protocol if the transformation requires whole-message semantics.
+## Optional Features
 
-## Reliability and security
+- **Worker Threads:** `WorkerPoolPlugin` is opt-in at runtime, but `piscina` is presently installed as a regular dependency. Workers execute caller-provided module exports, not a built-in job scheduler.
+- **Native file operations:** `engine.file` uses `koffi`, currently a regular dependency. Binary and stream controllers do not load these native bindings. File operations fail if required native bindings are unavailable; there is no path-only fallback.
+- **KMS:** `KmsEncryptionPlugin` requires a provider implementation supplied by your application.
+- **Validation and observability:** Zod validation, logging, tracing, audit logging, and caller-owned failure sinks are integrated only when configured.
 
-PipeX supports size limits, operation deadlines, cancellation, bounded concurrency, error classification, audit hooks, and authenticated stream framing. Encrypted streams authenticate each bounded frame before releasing its plaintext; a final authentication frame detects truncation.
+## Performance & Resource Limits
 
-When reversing data received from outside your process, provide an application-owned expected type rather than trusting type hints from the payload. For deployments that process sensitive data, review the production security guidance before shipping.
+Streaming reduces whole-payload buffering, but some operations (including HMAC verification and binary processing) necessarily retain bounded data in memory. The engine enforces finite defaults for input/output bytes, frames, concurrent operations, retry attempts, and deadlines.
 
-PipeX does **not** provide built-in durable queues, automatic replay, scheduling, or key storage. The optional `dlq` interface is a caller-provided failure sink.
+```ts
+const limited = new DataEngine({
+  maxInputBytes: 64 * 1024 * 1024,
+  maxOutputBytes: 256 * 1024 * 1024,
+  maxFrameBytes: 8 * 1024 * 1024,
+  maxConcurrentOperations: 32,
+  operationTimeoutMs: 30_000,
+});
+```
+
+These are example limits, not all defaults. See [resource-limit details](docs/enterprise.md#resource-limits).
 
 ## Documentation
 
-- [Architecture and design](docs/architecture.md)
-- [Production configuration, security, and operations](docs/enterprise.md)
-- [Encryption format migration](docs/encryption-v4-migration.md)
+- [Complete public API reference](docs/api.md)
+- [Architecture](docs/architecture.md)
+- [Production operations and security](docs/enterprise.md)
+- [Encryption v4 migration](docs/encryption-v4-migration.md)
 - [Changelog](CHANGELOG.md)
-- [Contributing](CONTRIBUTING.md)
-- [Support](SUPPORT.md)
-- [Security policy](SECURITY.md)
 
-## Development
+## Contributing & License
 
-```bash
-npm ci --ignore-scripts --no-audit --no-fund
-npm run quality:ci
-npm audit --audit-level=high
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md), and [SECURITY.md](SECURITY.md). Report vulnerabilities privately according to the security policy, not in public issues.
 
-
-## License
-
-MIT © Snyxex
+MIT © Snyxex.
