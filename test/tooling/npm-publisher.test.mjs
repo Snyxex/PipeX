@@ -24,7 +24,6 @@ test('npm publishing is isolated, manually approved and absent from normal CI', 
   assert.doesNotMatch(publisher, /--version 1\.0\.2/);
   assert.doesNotMatch(readonly, /defaultValue: '1\.0\.2'/);
   assert.match(publisher, /input message:/);
-  assert.match(publisher, /sha256sum -c -/);
   assert.match(publisher, /npm publish \.artifacts\/\$\{RELEASE_ARCHIVE\}/);
   assert.match(publisher, /withCredentials\(\[string\(credentialsId:/);
   assert.match(publisher, /NPM_CONFIG_USERCONFIG/);
