@@ -322,3 +322,11 @@ MIT © Snyxex.
 ## Typed error handling
 
 Use `PipeXError` and its subclasses to distinguish validation, compression, encryption, hashing, unsupported algorithms, and pipeline cancellation. Error messages must not include inputs or secrets. See [the API error reference](docs/api.md#typed-errors) for codes, examples, and compatibility details.
+
+## Package size and optional features
+
+The npm package ships minified ESM and CommonJS builds, declaration files for both module systems, and project documentation. Production source maps are omitted to reduce installed package size; build maps can still be generated separately for debugging. A smaller tarball does not imply lower transitive dependency installation cost.
+
+Run `npm run build && npm run report:bundle-size` to generate an itemized `npm pack --dry-run --json --ignore-scripts` report with aggregate package bytes and an estimated module breakdown. The report excludes external dependency installation sizes; its per-entry figures are based on statically discovered JS chunks, not runtime heap or actual consumer bundler tree-shaking.
+
+The current root import exposes all standard plugins for backward compatibility. For smaller imports, use the already published `@snyxex/pipex/compression`, `@snyxex/pipex/encryption`, and `@snyxex/pipex/hashing` entry points. These entry points share package installation and do **not** eliminate dependencies of the published package. A future major-version split could move worker execution (Piscina), native bindings (Koffi), and schema validation (Zod) into separate opt-in packages; that requires an API and compatibility migration.

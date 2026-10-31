@@ -36,7 +36,8 @@
     "typecheck:ci": "tsc -p tsconfig.ci-types.json --noEmit",
     "test:vitest": "vitest run",
     "coverage:vitest": "vitest run --coverage",
-    "test:examples": "node scripts/verify-examples.mjs"
+    "test:examples": "node scripts/verify-examples.mjs",
+    "report:bundle-size": "node scripts/report-bundle-size.mjs"
   },
   "keywords": [
     "data-transformation",
@@ -161,7 +162,10 @@
     }
   },
   "files": [
-    "dist",
+    "dist/*.mjs",
+    "dist/*.cjs",
+    "dist/*.d.mts",
+    "dist/*.d.cts",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
