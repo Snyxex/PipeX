@@ -7,19 +7,19 @@ import {
 } from '../../dist/index.mjs';
 
 const cases = [
- [ValidationError, 'VALIDATION_FAILED'],
- [CompressionError, 'COMPRESSION_FAILED'],
- [EncryptionError, 'ENCRYPTION_FAILED'],
- [HashingError, 'HASHING_FAILED'],
- [PipelineAbortedError, 'OPERATION_ABORTED'],
- [UnsupportedAlgorithmError, 'UNSUPPORTED_ALGORITHM'],
+ [ValidationError, 'VALIDATION_FAILED', 'ValidationError'],
+ [CompressionError, 'COMPRESSION_FAILED', 'CompressionError'],
+ [EncryptionError, 'ENCRYPTION_FAILED', 'EncryptionError'],
+ [HashingError, 'HASHING_FAILED', 'HashingError'],
+ [PipelineAbortedError, 'OPERATION_ABORTED', 'PipelineAbortedError'],
+ [UnsupportedAlgorithmError, 'UNSUPPORTED_ALGORITHM', 'UnsupportedAlgorithmError'],
 ];
-for (const [ErrorType, code] of cases) {
- test(ErrorType.name + ' exposes stable typed metadata without secret input', () => {
+for (const [ErrorType, code, stableName] of cases) {
+ test(stableName + ' exposes stable typed metadata without secret input', () => {
   const error = new ErrorType({ transformName: 'test-transform', stage: 'process' });
   assert.ok(error instanceof Error);
   assert.ok(error instanceof PipeXError);
-  assert.equal(error.name, ErrorType.name);
+  assert.equal(error.name, stableName);
   assert.equal(error.code, code);
   assert.equal(error.transformName, 'test-transform');
   assert.equal(error.stage, 'process');
