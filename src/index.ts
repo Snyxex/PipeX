@@ -44,6 +44,14 @@ export {
   OperationAbortedError,
   OperationTimeoutError,
   PipeXError,
+  ValidationError,
+  CompressionError,
+  HashingError,
+  PipelineAbortedError,
+  UnsupportedAlgorithmError,
+  EncryptionError,
+  InvalidKeyError,
+  AuthenticationError,
   UnsupportedReverseError,
   UnsupportedStreamingError,
   UnsupportedKmsOperationError,
@@ -64,9 +72,9 @@ import { WorkerPoolPlugin } from './plugin/worker.js';
 import { ValidationPlugin } from './core/validation.js';
 import { KmsEncryptionPlugin } from './plugin/kms_encryption.js';
 
-export type { HashingOptions, HashAlgorithm, Sha256HashingOptions, Sha512HashingOptions } from './plugin/hashing.js';
-export type { EncryptionOptions, EncryptionAlgorithm, Aes256GcmOptions, ChaCha20Poly1305Options, EncryptionCommonOptions } from './plugin/encryption.js';
-export type { CompressionOptions, CompressionType, GzipCompressionOptions, BrotliCompressionOptions, NoCompressionOptions } from './plugin/compression.js';
+export type { HashingOptions, HashAlgorithm } from './plugin/hashing.js';
+export type { EncryptionOptions, EncryptionAlgorithm } from './plugin/encryption.js';
+export type { CompressionOptions, CompressionType } from './plugin/compression.js';
 export type { WorkerPoolOptions } from './plugin/worker.js';
 export type { ValidationOptions } from './core/validation.js';
 export type { KmsEncryptionOptions } from './plugin/kms_encryption.js';
