@@ -234,6 +234,7 @@ export function encryptBuffer(data: Buffer, options: EncryptionFormatOptions, co
 }
 
 export function decryptBuffer(data: Buffer, options: EncryptionFormatOptions, context?: ProcessorContext): Buffer {
+  assertEncryptionKey(options.key);
   const limits = limitsFor(context);
   if (data.length > limits.maxInputBytes) throw new Error(`[PipeX] Decryption input exceeds ${limits.maxInputBytes} bytes`);
   // Legacy packets always start with algorithm id 1 or 2. Reserve the magic
@@ -296,6 +297,7 @@ export function decryptBuffer(data: Buffer, options: EncryptionFormatOptions, co
 }
 
 export function createEncryptionStream(options: EncryptionFormatOptions, context?: StreamPluginContext): Transform {
+  assertEncryptionKey(options.key);
   const limits = limitsFor(context);
   const frameSizeBytes = resolveFrameSize(options, limits);
   if (encodedLength(0, frameSizeBytes) > limits.maxOutputBytes) throw new Error(`[PipeX] Encryption output exceeds ${limits.maxOutputBytes} bytes`);
@@ -361,6 +363,7 @@ export function createEncryptionStream(options: EncryptionFormatOptions, context
 }
 
 export function createDecryptionStream(options: EncryptionFormatOptions, context?: StreamPluginContext): Transform {
+  assertEncryptionKey(options.key);
   const limits = limitsFor(context);
   let format: 'unknown' | 'framed' | 'legacy' = 'unknown';
   let totalInput = 0;
