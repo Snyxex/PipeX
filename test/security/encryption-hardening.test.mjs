@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Readable, Writable } from 'node:stream';
-import { DataEngine, EncryptionPlugin, InvalidKeyError, AuthenticationError } from '../../dist/index.mjs';
+import { randomBytes, createCipheriv } from 'node:crypto';
+import { DataEngine, EncryptionPlugin, KmsEncryptionPlugin, KmsAuthenticationError, InvalidKeyError, AuthenticationError } from '../../dist/index.mjs';
 
 const key = Buffer.alloc(32, 0x51);
 const make = (algorithm = 'aes-256-gcm', options = {}) =>
@@ -89,4 +90,30 @@ test('authentication failures and logger output do not disclose key material', a
   const visible = JSON.stringify(entries) + String(observed);
   assert.doesNotMatch(visible, /sensitive-message/);
   assert.ok(!visible.includes(key.toString('hex')));
+});
+
+
+test('legacy encrypted records are rejected by default but explicitly migratable', async () => {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, nonce, { authTagLength: 16 });
+  const plaintext = Buffer.from('legacy-example');
+  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const legacy = Buffer.concat([Buffer.from([1]), nonce, cipher.getAuthTag(), encrypted]);
+  await assert.rejects(make().binary.undo(legacy, 'buffer'), /legacy format disabled/);
+  const migrationReader = make('aes-256-gcm', { allowLegacyDecrypt: true });
+  assert.deepEqual(await migrationReader.binary.undo(legacy, 'buffer'), plaintext);
+});
+
+test('KMS envelopes verify their tags and report sanitized failures', async () => {
+  const dataKey = Buffer.alloc(32, 0x41);
+  const provider = {
+    async generateDataKey() { return { plaintext: Buffer.from(dataKey), ciphertext: Buffer.from('wrapped-key'); }; },
+    async decrypt() { return Buffer.from(dataKey); },
+  };
+  const engine = new DataEngine().use(new KmsEncryptionPlugin({ kms: provider, keyId: 'test-key' }));
+  const result = await engine.binary.run(Buffer.from('kms-message'));
+  const modified = Buffer.from(result.data);
+  modified[modified.length - 1] ^= 0x01;
+  await assert.rejects(engine.binary.undo(modified, 'buffer'), KmsAuthenticationError);
+  assert.deepEqual(await engine.binary.undo(result.data, 'buffer'), Buffer.from('kms-message'));
 });
