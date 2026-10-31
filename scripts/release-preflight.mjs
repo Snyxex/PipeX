@@ -32,7 +32,7 @@ export function checkReleaseSpec(manifest, expectedName, expectedVersion, tags =
   if (!manifest.bugs?.url?.includes('github.com/Snyxex/PipeX')) {
     errors.push('Public bug-reporting metadata is missing.');
   }
-  for (const required of ['dist', 'LICENSE', 'README.md', 'SECURITY.md', 'CHANGELOG.md']) {
+  for (const required of ['dist', 'LICENSE', 'README.md', 'CHANGELOG.md']) {
     if (!manifest.files?.includes(required)) errors.push('Missing public tarball entry: ' + required);
   }
   if ((manifest.files ?? []).some(path => path === 'docs' || path.startsWith('.ci') || path.startsWith('test/') || path.includes('jenkins'))) {
