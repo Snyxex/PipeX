@@ -18,8 +18,8 @@ test('npm publishing is isolated, manually approved and absent from normal CI', 
   assert.match(publisher, /npm audit --audit-level=high/);
   assert.match(publisher, /verify-packed-consumer\.mjs/);
   assert.match(publisher, /CONFIRM_RELEASE/);
-  assert.match(publisher, /readFile\('package\.json'\)/);
-  assert.match(readonly, /readFile\('package\.json'\)/);
+  assert.match(publisher, /mise exec node@24 -- node -p/);
+  assert.match(readonly, /mise exec node@24 -- node -p/);
   assert.doesNotMatch(publisher, /--version 1\.0\.2/);
   assert.doesNotMatch(readonly, /defaultValue: '1\.0\.2'/);
   assert.match(publisher, /input message:/);
