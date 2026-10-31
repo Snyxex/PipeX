@@ -8,7 +8,9 @@ for (const path of files) {
   if (blocked.test(path)) errors.push('Sensitive file tracked: ' + path);
   if (!/\.(?:ts|js|mjs|cjs|json)$/.test(path) || path.endsWith('package-lock.json')) continue;
   const source = await readFile(path, 'utf8');
-  if (source.includes('<<<<<<< ') || source.includes('>>>>>>> ')) errors.push('Unresolved merge marker: ' + path);
+  const conflictStart = '<'.repeat(7) + ' ';
+  const conflictEnd = '>'.repeat(7) + ' ';
+  if (source.includes(conflictStart) || source.includes(conflictEnd)) errors.push('Unresolved merge marker: ' + path);
 }
 if (errors.length) {
   console.error(errors.join('\n'));
