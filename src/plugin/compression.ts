@@ -6,6 +6,7 @@ import {
 import { promisify } from 'node:util';
 import { compose, Duplex, PassThrough, Readable, Transform, type TransformCallback } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
+import { CompressionError, UnsupportedAlgorithmError } from '../core/errors.js';
 import { buildByteLimitTransform } from '../core/core.js';
 import { pluginInputLimit, pluginOutputLimit } from '../core/resourceLimits.js';
 import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
@@ -43,32 +44,32 @@ export class CompressionPlugin extends BasePlugin {
 
   constructor(protected override options: CompressionOptions) {
     super(options);
-    if (!(options.type in TYPE_BYTE_MAP)) throw new Error('[PipeX] Compression: unknown type');
+    if (!(options.type in TYPE_BYTE_MAP)) throw new UnsupportedAlgorithmError({ transformName: 'compression', stage: 'configuration' });
     if (options.level !== undefined && !Number.isInteger(options.level)) {
-      throw new Error('[PipeX] Compression: level must be an integer');
+      throw new CompressionError({ transformName: 'compression' });
     }
     if (options.type === 'gzip' && options.level !== undefined && (options.level < 0 || options.level > 9)) {
-      throw new Error('[PipeX] Compression: gzip level must be between 0 and 9');
+      throw new CompressionError({ transformName: 'compression' });
     }
     if (options.type === 'brotli' && options.level !== undefined && (options.level < 0 || options.level > 11)) {
-      throw new Error('[PipeX] Compression: Brotli level must be between 0 and 11');
+      throw new CompressionError({ transformName: 'compression' });
     }
     if (options.type === 'none' && options.level !== undefined) {
-      throw new Error('[PipeX] Compression: level is not supported when type is none');
+      throw new CompressionError({ transformName: 'compression' });
     }
   }
 
   public override async process(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
     const maxInputBytes = pluginInputLimit(ctx);
     const maxOutputBytes = pluginOutputLimit(ctx);
-    if (data.length > maxInputBytes) throw new Error(`[PipeX] Compression input exceeds ${maxInputBytes} bytes`);
+    if (data.length > maxInputBytes) throw new CompressionError({ transformName: 'compression', stage: 'input' });
     const { type, level } = this.options;
     const header = Buffer.from([TYPE_BYTE_MAP[type]]);
     if (data.length > maxOutputBytes - header.length && type === 'none') {
-      throw new Error(`[PipeX] Compression output exceeds ${maxOutputBytes} bytes`);
+      throw new CompressionError({ transformName: 'compression', stage: 'output' });
     }
     if (maxOutputBytes <= header.length && type !== 'none') {
-      throw new Error(`[PipeX] Compression output exceeds ${maxOutputBytes} bytes`);
+      throw new CompressionError({ transformName: 'compression', stage: 'output' });
     }
 
     let compressed: Buffer;
@@ -89,8 +90,8 @@ export class CompressionPlugin extends BasePlugin {
   public override async reverse(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
     const maxInputBytes = pluginInputLimit(ctx);
     const maxOutputBytes = pluginOutputLimit(ctx);
-    if (data.length > maxInputBytes) throw new Error(`[PipeX] Compression input exceeds ${maxInputBytes} bytes`);
-    if (data.length < 1) throw new Error('[PipeX] Compression reverse: packet too short');
+    if (data.length > maxInputBytes) throw new CompressionError({ transformName: 'compression', stage: 'input' });
+    if (data.length < 1) throw new CompressionError({ transformName: 'compression' });
     
     const typeId = data.readUInt8(0);
     const type = ID_TO_TYPE[typeId];
@@ -104,8 +105,8 @@ export class CompressionPlugin extends BasePlugin {
       const out = await brotliDecompressAsync(payload, { maxOutputLength: maxOutputBytes });
       return out;
     }
-    if (type !== 'none') throw new Error('[PipeX] Compression: unknown type');
-    if (payload.length > maxOutputBytes) throw new Error(`[PipeX] Compression output exceeds ${maxOutputBytes} bytes`);
+    if (type !== 'none') throw new UnsupportedAlgorithmError({ transformName: 'compression', stage: 'configuration' });
+    if (payload.length > maxOutputBytes) throw new CompressionError({ transformName: 'compression', stage: 'output' });
     return payload;
   }
 
@@ -149,17 +150,17 @@ export class CompressionPlugin extends BasePlugin {
       let outputBytes = 0;
       while (!first) {
         const next = await iterator.next();
-        if (next.done) throw new Error('[PipeX] Stream decompression: packet too short');
+        if (next.done) throw new CompressionError({ transformName: 'compression' });
         const chunk = Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value);
         if (chunk.length > maxInputBytes - inputBytes) {
-          throw new Error(`[PipeX] Compression input exceeds ${maxInputBytes} bytes`);
+          throw new CompressionError({ transformName: 'compression', stage: 'input' });
         }
         inputBytes += chunk.length;
         if (chunk.length > 0) first = chunk;
       }
 
       const detectedType = ID_TO_TYPE[first.readUInt8(0)];
-      if (!detectedType) throw new Error('[PipeX] Stream decompression: unknown type');
+      if (!detectedType) throw new UnsupportedAlgorithmError({ transformName: 'compression', stage: 'decompress' });
       const decompressor = detectedType === 'gzip'
         ? createGunzip()
         : detectedType === 'brotli'
@@ -174,7 +175,7 @@ export class CompressionPlugin extends BasePlugin {
           if (next.done) return;
           const chunk = Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value);
           if (chunk.length > maxInputBytes - inputBytes) {
-            throw new Error(`[PipeX] Compression input exceeds ${maxInputBytes} bytes`);
+            throw new CompressionError({ transformName: 'compression', stage: 'input' });
           }
           inputBytes += chunk.length;
           if (chunk.length > 0) yield chunk;
@@ -185,7 +186,7 @@ export class CompressionPlugin extends BasePlugin {
         for await (const chunk of compose(Readable.from(payload()), decompressor)) {
           const output = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           if (output.length > maxOutputBytes - outputBytes) {
-            throw new Error(`[PipeX] Compression output exceeds ${maxOutputBytes} bytes`);
+            throw new CompressionError({ transformName: 'compression', stage: 'output' });
           }
           outputBytes += output.length;
           yield output;

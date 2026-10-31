@@ -381,3 +381,31 @@ The `PXAE` header uses wire-format version 1, while the encryption plugin implem
 ## Resource and security guidance
 
 See [production operations](enterprise.md), [architecture](architecture.md), and [encryption migration](encryption-v4-migration.md). Prefer explicit operation limits and timeouts, native streams for large payloads, private filesystem roots, and external key storage. `piscina` and `koffi` are regular dependencies even though worker and native-file usage is opt-in at runtime.
+
+
+## Typed errors
+
+All public domain errors inherit from `PipeXError` (and `Error`). They expose `name`, `code`, `message`, optional `cause`, `transformName` and `stage`. The new fixed error messages never serialize payloads, keys or passphrases. Do not attach untrusted provider errors as causes or log input buffers.
+
+| Class | Code | Meaning |
+| --- | --- | --- |
+| `ValidationError` | `VALIDATION_FAILED` | Invalid serialized input or schema validation |
+| `CompressionError` | `COMPRESSION_FAILED` | Compression/decompression or size validation |
+| `EncryptionError` | `ENCRYPTION_FAILED` | Invalid encryption configuration |
+| `HashingError` | `HASHING_FAILED` | HMAC verification or hashing failure |
+| `PipelineAbortedError` | `OPERATION_ABORTED` | Cancellation; existing `OperationAbortedError` inherits from it |
+| `UnsupportedAlgorithmError` | `UNSUPPORTED_ALGORITHM` | Unsupported compression, encryption or hash algorithm |
+
+Existing specialized errors remain part of the API: `OperationTimeoutError`, `UnsupportedReverseError`, `UnsupportedStreamingError`, `InvalidPluginCapabilityError`, KMS provider/authentication errors, and worker pool/task errors. Transport and operating-system failures may still surface as native errors; not every error path is normalized.
+
+```ts
+import { PipeXError, HashingError, PipelineAbortedError } from '@snyxex/pipex';
+try {
+  await engine.binary.run(input);
+} catch (error: unknown) {
+  if (error instanceof HashingError) console.error(error.code);
+  else if (error instanceof PipelineAbortedError) console.error('Cancelled');
+  else if (error instanceof PipeXError) console.error(error.code, error.stage);
+  else throw error;
+}
+```

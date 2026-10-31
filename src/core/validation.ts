@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BasePlugin } from './plugin.js';
+import { ValidationError } from './errors.js';
 import { UNPACKR, assertMessagePackFrameLimits } from './core.js';
 import { DEFAULT_LIMITS } from './resourceLimits.js';
 import { pluginInputLimit, pluginOutputLimit } from './resourceLimits.js';
@@ -36,7 +37,7 @@ export class ValidationPlugin extends BasePlugin {
 
   public override async reverse(data: Buffer, ctx: ProcessorContext): Promise<Buffer> {
     const maxBytes = Math.min(pluginInputLimit(ctx), pluginOutputLimit(ctx));
-    if (data.length > maxBytes) throw new Error(`[PipeX] Validation input exceeds ${maxBytes} bytes`);
+    if (data.length > maxBytes) throw new ValidationError({ transformName: 'validation' });
     if (this.options.validateOnReverse) {
       this.validate(data, maxBytes, ctx.limits?.maxFrameBytes);
     }
@@ -44,18 +45,18 @@ export class ValidationPlugin extends BasePlugin {
   }
 
   private validate(data: Buffer, maxBytes: number, maxFrameBytes = DEFAULT_LIMITS.maxFrameBytes): void {
-    if (data.length > maxBytes) throw new Error(`[PipeX] Validation input exceeds ${maxBytes} bytes`);
+    if (data.length > maxBytes) throw new ValidationError({ transformName: 'validation' });
     assertMessagePackFrameLimits(data, maxFrameBytes, 1);
     let decoded: unknown;
     try {
       decoded = UNPACKR.unpack(data);
     } catch {
-      throw new Error('[PipeX] Validation: invalid MessagePack input');
+      throw new ValidationError({ transformName: 'validation' });
     }
 
     const result = this.options.schema.safeParse(decoded);
     if (!result.success) {
-      throw new Error('[PipeX] Validation failed');
+      throw new ValidationError({ transformName: 'validation' });
     }
   }
 
@@ -66,7 +67,7 @@ export class ValidationPlugin extends BasePlugin {
     return new Transform({
       transform(chunk, _enc, cb) {
         if (chunk.length > maxBytes - total) {
-          return cb(new Error(`[PipeX] Validation input exceeds ${maxBytes} bytes`));
+          return cb(new ValidationError({ transformName: 'validation' }));
         }
         total += chunk.length;
         chunks.push(chunk);

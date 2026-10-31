@@ -26,6 +26,7 @@ import {
 import type { EngineResult, PipeXManifest, OperationOptions, BinaryUndoOptions } from '../types.js';
 
 import { awaitOperation, throwIfAborted } from '../operations.js';
+import { ValidationError } from '../errors.js';
 
 export class BinaryController {
   readonly #engine: DataEngine;
@@ -52,7 +53,7 @@ export class BinaryController {
       return packed;
     } catch (err: unknown) {
       if (err instanceof Error && err.message.startsWith('[PipeX]')) throw err;
-      throw new Error('[PipeX] binary.pack failed');
+      throw new ValidationError({ stage: 'pack' });
     }
   }
 
@@ -66,7 +67,7 @@ export class BinaryController {
       return UNPACKR.unpack(input as Buffer) as T;
     } catch (err: unknown) {
       if (err instanceof Error && err.message.startsWith('[PipeX]')) throw err;
-      throw new Error('[PipeX] binary.unpack failed: invalid MessagePack input');
+      throw new ValidationError({ stage: 'unpack' });
     }
   }
 

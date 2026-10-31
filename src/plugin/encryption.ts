@@ -1,5 +1,6 @@
 import type { Transform } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
+import { EncryptionError, UnsupportedAlgorithmError } from '../core/errors.js';
 import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
 import {
   createDecryptionStream,
@@ -30,18 +31,20 @@ export class EncryptionPlugin extends BasePlugin {
 
   constructor(protected override options: EncryptionOptions) {
     super(options);
-    if (!options || !['aes-256-gcm', 'chacha20-poly1305'].includes(options.algorithm)
-      || !Buffer.isBuffer(options.key) || options.key.length !== 32) {
-      throw new Error('[PipeX] Encryption: invalid algorithm or key');
+    if (!options || !['aes-256-gcm', 'chacha20-poly1305'].includes(options.algorithm)) {
+      throw new UnsupportedAlgorithmError({ transformName: 'encryption', stage: 'configuration' });
+    }
+    if (!Buffer.isBuffer(options.key) || options.key.length !== 32) {
+      throw new EncryptionError({ transformName: 'encryption', stage: 'configuration' });
     }
     if (options.frameSizeBytes !== undefined
       && (!Number.isSafeInteger(options.frameSizeBytes)
         || options.frameSizeBytes < 1
         || options.frameSizeBytes > 0xffff_ffff)) {
-      throw new Error('[PipeX] Encryption frameSizeBytes must be a positive 32-bit integer');
+      throw new EncryptionError({ transformName: 'encryption', stage: 'configuration' });
     }
     if (options.allowLegacyDecrypt !== undefined && typeof options.allowLegacyDecrypt !== 'boolean') {
-      throw new Error('[PipeX] Encryption allowLegacyDecrypt must be a boolean');
+      throw new EncryptionError({ transformName: 'encryption', stage: 'configuration' });
     }
   }
 
