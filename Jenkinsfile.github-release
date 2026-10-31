@@ -1,0 +1,80 @@
+// Separate trusted release job, configured to build only GitHub Release events.
+// NEVER attach npm credentials to ordinary PR, branch, or matrix builds.
+pipeline {
+  agent { label 'linux' }
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 45, unit: 'MINUTES')
+    skipDefaultCheckout(true)
+  }
+  parameters {
+    string(name: 'RELEASE_TAG', defaultValue: '', description: 'Immutable GitHub Release tag (vX.Y.Z)')
+    string(name: 'CONFIRM_RELEASE', defaultValue: '', description: 'Enter PUBLISH @snyxex/pipex@X.Y.Z')
+  }
+  environment {
+    CI = 'true'
+    MISE_YES = '1'
+    NPM_CONFIG_CACHE = "${WORKSPACE}/.npm"
+  }
+  stages {
+    stage('Checkout trusted release tag') {
+      steps {
+        checkout scm
+        sh '''
+          set -eu
+          TAG="$RELEASE_TAG"
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo 'Invalid release tag' >&2; exit 2 ;;
+          esac
+          git fetch --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+          git checkout --detach "refs/tags/$TAG"
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "refs/tags/$TAG")"
+          node -e "const p=require('./package.json'); if(process.env.RELEASE_TAG !== 'v'+p.version || p.name !== '@snyxex/pipex') process.exit(2)"
+        '''
+      }
+    }
+    stage('Verify and package') {
+      steps {
+        sh '''
+          set -eu
+          mise exec node@24 -- npm ci --ignore-scripts --no-audit --no-fund
+          mise exec node@24 -- npm run lint:ci
+          mise exec node@24 -- npm run typecheck:prod
+          mise exec node@24 -- npm run build
+          mise exec node@24 -- npm run quality:ci
+          mise exec node@24 -- npm pack --dry-run --ignore-scripts
+        '''
+      }
+    }
+    stage('Manual trusted approval') {
+      steps {
+        script {
+          def expected = "PUBLISH @snyxex/pipex@${env.RELEASE_TAG.substring(1)}"
+          if (params.CONFIRM_RELEASE != expected) error('Release confirmation mismatch')
+          input message: "Publish verified ${env.RELEASE_TAG} to npm?", ok: 'Approve npm publish'
+        }
+      }
+    }
+    stage('Publish from trusted credentials') {
+      steps {
+        withCredentials([string(credentialsId: 'pipex-npm-release-token', variable: 'NPM_TOKEN')]) {
+          sh '''
+            set +x
+            set -eu
+            umask 077
+            NPMRC="$(mktemp)"
+            trap 'rm -f "$NPMRC"' EXIT
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$NPMRC"
+            export NPM_CONFIG_USERCONFIG="$NPMRC"
+            mise exec node@24 -- npm publish --ignore-scripts --access public --registry=https://registry.npmjs.org/
+          '''
+        }
+      }
+    }
+  }
+  post {
+    cleanup { deleteDir() }
+  }
+}

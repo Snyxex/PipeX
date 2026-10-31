@@ -6,6 +6,9 @@ import { pipeline } from 'node:stream/promises';
 import test from 'node:test';
 import {
   CompressionPlugin,
+  CompressionError,
+  HashingError,
+  ValidationError,
   DataEngine,
   EncryptionPlugin,
   HashingPlugin,
@@ -171,15 +174,28 @@ test('standard plugins enforce request limits before expensive or copying work',
 
   const hashing = new HashingPlugin({ algorithm: 'sha256', secret: '0123456789abcdef' });
   assert.equal((await hashing.process(input, context(input.length + 32))).length, input.length + 32);
-  await assert.rejects(hashing.process(input, context(input.length + 31)), /Hashing output exceeds/);
+  await assert.rejects(hashing.process(input, context(input.length + 31)), error => {
+    assert.ok(error instanceof HashingError);
+    assert.equal(error.code, 'HASHING_FAILED');
+    return true;
+  });
 
   const compression = new CompressionPlugin({ type: 'none' });
   assert.equal((await compression.process(input, context(input.length + 1))).length, input.length + 1);
-  await assert.rejects(compression.process(input, context(input.length)), /Compression output exceeds/);
+  await assert.rejects(compression.process(input, context(input.length)), error => {
+    assert.ok(error instanceof CompressionError);
+    assert.equal(error.code, 'COMPRESSION_FAILED');
+    return true;
+  });
 
   let parsed = false;
   const validation = new ValidationPlugin({ schema: { safeParse() { parsed = true; return { success: true }; } } });
-  await assert.rejects(validation.process(PACKR.pack('sensitive-value'), context(4, 256)), /Validation input exceeds 4 bytes/);
+  await assert.rejects(validation.process(PACKR.pack('sensitive-value'), context(4, 256)), error => {
+    assert.ok(error instanceof ValidationError);
+    assert.equal(error.code, 'VALIDATION_FAILED');
+    assert.doesNotMatch(error.message, /sensitive-value/);
+    return true;
+  });
   assert.equal(parsed, false);
 });
 

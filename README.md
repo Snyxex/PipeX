@@ -260,7 +260,7 @@ engine.stream.pipe(source, destination, reverse?, options?)
 - **Limits:** Input, output, frame, concurrency, and timeout limits protect the host; configure them for the deployment.
 - **KMS:** External providers are supplied by the application; the KMS plugin is binary-only and requires a working `generateDataKey` capability.
 
-**Compatibility:** Version 4 encryption writes framed `PXAE` only. Reading legacy unversioned v3 encrypted data is a temporary migration option (`allowLegacyDecrypt`, default `true`); disable it after migration. Format compatibility is not a promise that all future versions or arbitrary plugin combinations can read every older payload. Keep original plugin configuration and secrets where reversibility is required.
+**Compatibility:** Version 4 encryption writes framed `PXAE` only. Reading legacy unversioned v3 encrypted data is a temporary migration option (`allowLegacyDecrypt`, default `false`; explicitly enable it only during migration); disable it after migration. Format compatibility is not a promise that all future versions or arbitrary plugin combinations can read every older payload. Keep original plugin configuration and secrets where reversibility is required.
 
 See [Encryption migration](docs/encryption-v4-migration.md) and [Production security](docs/enterprise.md).
 
@@ -318,6 +318,10 @@ These are example limits, not all defaults. See [resource-limit details](docs/en
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md), and [SECURITY.md](SECURITY.md). Report vulnerabilities privately according to the security policy, not in public issues.
 
 MIT © Snyxex.
+
+## Typed error handling
+
+Use `PipeXError` and its subclasses to distinguish validation, compression, encryption, hashing, unsupported algorithms, and pipeline cancellation. Error messages must not include inputs or secrets. See [the API error reference](docs/api.md#typed-errors) for codes, examples, and compatibility details.
 
 ## Type-safe transformations
 
