@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
+import { HashingError, UnsupportedAlgorithmError } from '../core/errors.js';
 import { pluginInputLimit, pluginOutputLimit } from '../core/resourceLimits.js';
 import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
 
@@ -26,9 +27,9 @@ export class HashingPlugin extends BasePlugin {
 
   constructor(protected override options: HashingOptions) {
     super(options);
-    if (!(options.algorithm in HASH_LENGTHS)) throw new Error('[PipeX] Hashing: unknown algorithm');
+    if (!(options.algorithm in HASH_LENGTHS)) throw new UnsupportedAlgorithmError({ transformName: 'hashing', stage: 'configuration' });
     if (!options.secret || options.secret.length < 16) {
-      throw new Error('[PipeX] Hashing: Secret must be at least 16 characters');
+      throw new HashingError({ transformName: 'hashing' });
     }
   }
 
@@ -36,9 +37,9 @@ export class HashingPlugin extends BasePlugin {
     const maxInputBytes = pluginInputLimit(context);
     const maxOutputBytes = pluginOutputLimit(context);
     const digestLength = HASH_LENGTHS[this.options.algorithm];
-    if (data.length > maxInputBytes) throw new Error(`[PipeX] Hashing input exceeds ${maxInputBytes} bytes`);
+    if (data.length > maxInputBytes) throw new HashingError({ transformName: 'hashing', stage: 'input' });
     if (data.length > maxOutputBytes - digestLength) {
-      throw new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`);
+      throw new HashingError({ transformName: 'hashing', stage: 'output' });
     }
     context.metadata ??= {};
     const hmac = createHmac(this.options.algorithm, this.options.secret);
@@ -52,9 +53,9 @@ export class HashingPlugin extends BasePlugin {
     const len = HASH_LENGTHS[this.options.algorithm];
     const maxInputBytes = pluginInputLimit(context);
     const maxOutputBytes = pluginOutputLimit(context);
-    if (data.length > maxInputBytes) throw new Error(`[PipeX] Hashing input exceeds ${maxInputBytes} bytes`);
-    if (data.length < len) throw new Error('[PipeX] Hashing reverse: data too short');
-    if (data.length - len > maxOutputBytes) throw new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`);
+    if (data.length > maxInputBytes) throw new HashingError({ transformName: 'hashing', stage: 'input' });
+    if (data.length < len) throw new HashingError({ transformName: 'hashing' });
+    if (data.length - len > maxOutputBytes) throw new HashingError({ transformName: 'hashing', stage: 'output' });
 
     const originalData = data.subarray(0, data.length - len);
     const attachedHash = data.subarray(data.length - len);
@@ -63,7 +64,7 @@ export class HashingPlugin extends BasePlugin {
     const expected = hmac.update(originalData).digest();
     try {
       if (!timingSafeEqual(attachedHash, expected)) {
-        throw new Error('[PipeX] Hashing: HMAC verification failed');
+        throw new HashingError({ transformName: 'hashing' });
       }
 
       context.metadata ??= {};
@@ -86,15 +87,15 @@ export class HashingPlugin extends BasePlugin {
       return new Transform({
         construct(callback) {
           callback(maxOutputBytes < len
-            ? new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`)
+            ? new HashingError({ transformName: 'hashing', stage: 'output' })
             : undefined);
         },
         transform(chunk: Buffer, _enc, cb) {
           if (chunk.length > maxInputBytes - total) {
-            return cb(new Error(`[PipeX] Hashing input exceeds ${maxInputBytes} bytes`));
+            return cb(new HashingError({ transformName: 'hashing', stage: 'input' }));
           }
           if (chunk.length > maxOutputBytes - len - total) {
-            return cb(new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`));
+            return cb(new HashingError({ transformName: 'hashing', stage: 'output' }));
           }
           total += chunk.length;
           hmac.update(chunk);
@@ -114,7 +115,7 @@ export class HashingPlugin extends BasePlugin {
       return new Transform({
         transform(chunk: Buffer, _enc, cb) {
           if (chunk.length > maxInputBytes - total) {
-            return cb(new Error(`[PipeX] Hashing input exceeds ${maxInputBytes} bytes`));
+            return cb(new HashingError({ transformName: 'hashing', stage: 'input' }));
           }
           total += chunk.length;
           chunks.push(chunk);
@@ -125,14 +126,14 @@ export class HashingPlugin extends BasePlugin {
           chunks = [];
           let expected: Buffer | undefined;
           try {
-            if (buffer.length < len) throw new Error('[PipeX] Hashing stream: No HMAC found');
+            if (buffer.length < len) throw new HashingError({ transformName: 'hashing' });
             const originalData = buffer.subarray(0, buffer.length - len);
-            if (originalData.length > maxOutputBytes) throw new Error(`[PipeX] Hashing output exceeds ${maxOutputBytes} bytes`);
+            if (originalData.length > maxOutputBytes) throw new HashingError({ transformName: 'hashing', stage: 'output' });
             const attachedHash = buffer.subarray(buffer.length - len);
             hmac.update(originalData);
             expected = hmac.digest();
             if (!timingSafeEqual(attachedHash, expected)) {
-              throw new Error('[PipeX] Hashing stream: HMAC verification failed');
+              throw new HashingError({ transformName: 'hashing' });
             }
             const authenticated = Buffer.from(originalData);
             buffer.fill(0);

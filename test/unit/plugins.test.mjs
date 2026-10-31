@@ -59,7 +59,11 @@ test('HMAC verifies valid data and rejects tampering', async () => {
   const tagged = await plugin.process(input, context());
   assert.deepEqual(await plugin.reverse(tagged, context()), input);
   tagged[0] ^= 1;
-  await assert.rejects(plugin.reverse(tagged, context()), /HMAC verification failed/);
+  await assert.rejects(plugin.reverse(tagged, context()), error => {
+    assert.equal(error.name, 'HashingError');
+    assert.equal(error.code, 'HASHING_FAILED');
+    return true;
+  });
 });
 
 test('validation plugin checks decoded MessagePack values', async () => {

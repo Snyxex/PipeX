@@ -1,6 +1,6 @@
 import type { Transform } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
-import { EncryptionError, InvalidKeyError } from '../core/errors.js';
+import { EncryptionError, InvalidKeyError, UnsupportedAlgorithmError } from '../core/errors.js';
 import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
 import {
   createDecryptionStream,
@@ -32,7 +32,7 @@ export class EncryptionPlugin extends BasePlugin {
   constructor(protected override options: EncryptionOptions) {
     super(options);
     if (!options || !Buffer.isBuffer(options.key) || options.key.length !== 32) throw new InvalidKeyError();
-    if (!['aes-256-gcm', 'chacha20-poly1305'].includes(options.algorithm)) throw new EncryptionError('[PipeX] Unsupported encryption algorithm');
+    if (!['aes-256-gcm', 'chacha20-poly1305'].includes(options.algorithm)) throw new UnsupportedAlgorithmError({ transformName: 'encryption', stage: 'configuration' });
     if (options.frameSizeBytes !== undefined
       && (!Number.isSafeInteger(options.frameSizeBytes)
         || options.frameSizeBytes < 1

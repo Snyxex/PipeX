@@ -318,3 +318,7 @@ These are example limits, not all defaults. See [resource-limit details](docs/en
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md), and [SECURITY.md](SECURITY.md). Report vulnerabilities privately according to the security policy, not in public issues.
 
 MIT © Snyxex.
+
+## Typed error handling
+
+Use `PipeXError` and its subclasses to distinguish validation, compression, encryption, hashing, unsupported algorithms, and pipeline cancellation. Error messages must not include inputs or secrets. See [the API error reference](docs/api.md#typed-errors) for codes, examples, and compatibility details.

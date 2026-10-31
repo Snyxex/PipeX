@@ -1,4 +1,8 @@
 export type PipeXErrorCode =
+  | 'VALIDATION_FAILED'
+  | 'COMPRESSION_FAILED'
+  | 'HASHING_FAILED'
+  | 'UNSUPPORTED_ALGORITHM'
   | 'UNSUPPORTED_REVERSE'
   | 'UNSUPPORTED_STREAMING'
   | 'INVALID_PLUGIN_CAPABILITY'
@@ -21,12 +25,49 @@ export type PipeXErrorCode =
 export class PipeXError extends Error {
   public override readonly name: string = 'PipeXError';
 
+  readonly transformName?: string;
+  readonly stage?: string;
   constructor(
     public readonly code: PipeXErrorCode,
     message: string,
-    options?: ErrorOptions,
+    options?: ErrorOptions & { transformName?: string; stage?: string },
   ) {
     super(message, options);
+    this.transformName = options?.transformName;
+    this.stage = options?.stage;
+  }
+}
+
+/** Domain failures use fixed, non-sensitive messages. Never include input, keys or arbitrary provider errors. */
+export class ValidationError extends PipeXError {
+  override readonly name = 'ValidationError';
+  constructor(options?: ErrorOptions & { transformName?: string; stage?: string }) {
+    super('VALIDATION_FAILED', '[PipeX] Validation failed', options);
+  }
+}
+export class CompressionError extends PipeXError {
+  override readonly name = 'CompressionError';
+  constructor(options?: ErrorOptions & { transformName?: string; stage?: string }) {
+    super('COMPRESSION_FAILED', '[PipeX] Compression failed', options);
+  }
+}
+export class HashingError extends PipeXError {
+  override readonly name = 'HashingError';
+  constructor(options?: ErrorOptions & { transformName?: string; stage?: string }) {
+    super('HASHING_FAILED', '[PipeX] Hashing failed', options);
+  }
+}
+export class UnsupportedAlgorithmError extends PipeXError {
+  override readonly name = 'UnsupportedAlgorithmError';
+  constructor(options?: ErrorOptions & { transformName?: string; stage?: string }) {
+    super('UNSUPPORTED_ALGORITHM', '[PipeX] Unsupported algorithm', options);
+  }
+}
+/** Alias hierarchy: existing OperationAbortedError retains its code and instanceof contract. */
+export class PipelineAbortedError extends PipeXError {
+  override readonly name: string = 'PipelineAbortedError';
+  constructor(options?: ErrorOptions & { transformName?: string; stage?: string }) {
+    super('OPERATION_ABORTED', '[PipeX] Operation aborted', options);
   }
 }
 
@@ -70,10 +111,10 @@ export class InvalidPluginCapabilityError extends PipeXError {
   }
 }
 
-export class OperationAbortedError extends PipeXError {
+export class OperationAbortedError extends PipelineAbortedError {
   public override readonly name: string = 'OperationAbortedError';
   constructor(options?: ErrorOptions) {
-    super('OPERATION_ABORTED', '[PipeX] Operation aborted', options);
+    super(options);
   }
 }
 
