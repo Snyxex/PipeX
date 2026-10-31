@@ -318,3 +318,7 @@ These are example limits, not all defaults. See [resource-limit details](docs/en
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md), and [SECURITY.md](SECURITY.md). Report vulnerabilities privately according to the security policy, not in public issues.
 
 MIT © Snyxex.
+
+## Type-safe transformations
+
+The separate `typedPipeline()` API infers each step's input from the previous output, including asynchronous transforms; its `run()` returns `Promise<Output>`. This is distinct from the `DataEngine` binary plugins. See [TypeScript usage](docs/api.md#type-safe-application-transforms).

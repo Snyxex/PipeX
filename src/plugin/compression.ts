@@ -12,10 +12,14 @@ import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
 
 export type CompressionType = 'gzip' | 'brotli' | 'none';
 
-export interface CompressionOptions {
-  type: CompressionType;
-  level?: number;
-}
+/** Gzip level is validated at runtime to be within 0–9. */
+export interface GzipCompressionOptions { readonly type: 'gzip'; readonly level?: number; }
+/** Brotli quality is validated at runtime to be within 0–11. */
+export interface BrotliCompressionOptions { readonly type: 'brotli'; readonly level?: number; }
+/** Pass-through compression never accepts a level option. */
+export interface NoCompressionOptions { readonly type: 'none'; readonly level?: never; }
+/** Algorithm-discriminated compression configuration. */
+export type CompressionOptions = GzipCompressionOptions | BrotliCompressionOptions | NoCompressionOptions;
 
 const TYPE_BYTE_MAP: Record<CompressionType, number> = {
   'none':   0,

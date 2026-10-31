@@ -6,10 +6,12 @@ import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
 
 export type HashAlgorithm = 'sha256' | 'sha512';
 
-export interface HashingOptions {
-  algorithm: HashAlgorithm;
-  secret: string;
-}
+/** HMAC-SHA-256 options. Secret must be at least 16 characters at runtime. */
+export interface Sha256HashingOptions { readonly algorithm: 'sha256'; readonly secret: string; }
+/** HMAC-SHA-512 options. Secret must be at least 16 characters at runtime. */
+export interface Sha512HashingOptions { readonly algorithm: 'sha512'; readonly secret: string; }
+/** Algorithm-discriminated HMAC configuration. */
+export type HashingOptions = Sha256HashingOptions | Sha512HashingOptions;
 
 const HASH_LENGTHS: Record<HashAlgorithm, number> = {
   'sha256': 32,
