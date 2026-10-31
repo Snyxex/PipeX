@@ -70,7 +70,7 @@ export class StreamController {
     let finalCallback: ((error?: Error | null) => void) | undefined;
     const endpoint = new Writable({
       write(chunk, encoding, callback) {
-        source.write(chunk, encoding, callback);
+        // Forward the callback so Node's writable backpressure tracks the\n        // internal PassThrough rather than accepting unbounded input.\n        if (source.destroyed) {\n          callback(new Error('[PipeX] Stream pipeline is closed'));\n          return;\n        }\n        source.write(chunk, encoding, callback);
       },
       final(callback) {
         finalCallback = callback;
@@ -116,7 +116,7 @@ export class StreamController {
    * (compress direction) and forwards them to `destination`.
    *
    * @example
-   * readableSource.pipe(engine.stream.into(createWriteStream('out')));
+   * await pipeline(readableSource, engine.stream.into(createWriteStream('out')));
    */
   into(destination: Writable, options: OperationOptions = {}): Writable {
     return this.#into(destination, false, options);
@@ -127,7 +127,7 @@ export class StreamController {
    * (decompress direction) and forwards to `destination`.
    *
    * @example
-   * readableSource.pipe(engine.stream.reverseInto(createWriteStream('restored')));
+   * await pipeline(readableSource, engine.stream.reverseInto(createWriteStream('restored')));
    */
   reverseInto(destination: Writable, options: OperationOptions = {}): Writable {
     return this.#into(destination, true, options);
@@ -138,7 +138,7 @@ export class StreamController {
    * A manifest header frame is prepended automatically.
    *
    * @example
-   * objectSource.pipe(engine.stream.pack()).pipe(tcpSocket);
+   * await pipeline(objectSource, engine.stream.pack(), tcpSocket);
    */
   pack(options: OperationOptions = {}): Duplex {
     const signal = this.#engine.createOperationSignal(options);
@@ -177,7 +177,7 @@ export class StreamController {
    * Fires the engine's 'manifest' event when the header frame is detected.
    *
    * @example
-   * tcpSocket.pipe(engine.stream.unpack()).on('data', obj => console.log(obj));
+   * await pipeline(tcpSocket, engine.stream.unpack(), objectDestination);
    */
   unpack(options: OperationOptions = {}): Duplex {
     const signal = this.#engine.createOperationSignal(options);
