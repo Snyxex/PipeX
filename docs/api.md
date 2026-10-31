@@ -215,13 +215,147 @@ interface KmsRequestOptions { signal?: AbortSignal }
 
 `getKmsProviderCapabilities(provider)` returns a validated capability view and `supportsKmsOperation(provider, operation)` tests support. Explicitly disabled capabilities prevent calls even when a compatibility method stub exists; a claimed supported capability with no method throws.
 
-## Other exported helpers
+## Low-level root exports
 
-The root also re-exports internal building blocks from `src/core/core.ts`, which remain callable public named exports: `withRetry`, `PIPEX_MANIFEST_KEY`, `PACKR`, `UNPACKR`, `MAX_FRAME_BYTES`, `DEFAULT_HIGH_WATER`, `DEFAULT_LIMITS`, `hasStreamSupport`, `getPluginCapabilities`, `supportsOperation`, `supportsReverse`, `assertReversiblePipeline`, `assertStreamingPipeline`, `detectType`, `toBuffer`, `ORIGINAL_TYPES`, `assertOriginalType`, `fromBuffer`, `makeContext`, `buildManifest`, `buildManifestHeaderTransform`, `buildManifestExtractTransform`, `GuardedUnpackrStream`, `createPackrStream`, `createUnpackrStream`, `buildByteLimitTransform`, `buildObjectLimitTransform`, `assertKnownValueByteLimit`, `buildKnownValueByteLimitTransform`, `buildFallbackTransform`, `buildNdjsonTransform`, `buildTransformChain`, `runPipeline`, `assertExists`, `resolveOutputPath`, `assertMessagePackFrameLimits`, and `buildFrameLimitTransform`.
+These utilities are exported through the package root even though the controller facade is preferable for most application code. Signatures below reflect the implementation; `Readable`, `Writable`, `Duplex`, and `Transform` are Node.js stream types. Validation errors typically throw synchronously; stream processing failures are emitted or reject an awaited pipeline.
 
-These are low-level utilities rather than the recommended application facade. Their exact argument types are defined by the shipped TypeScript declarations and source; use controller methods for application workflows.
+### Plugin capabilities and retries
 
-`isManifest(value: unknown): value is PipeXManifest` tests the structural shape of a PipeX manifest.
+```ts
+function withRetry<T>(
+  fn: () => Promise<T> | T,
+  options?: RetryOptions,
+  logger?: Logger,
+  control?: {
+    signal?: AbortSignal;
+    limits?: Pick<EngineLimits, 'maxRetryAttempts' | 'maxRetryDelayMs'>;
+    track?: (pending: Promise<unknown>) => void;
+  },
+): Promise<T>;
+
+function hasStreamSupport(plugin: ProcessorPlugin): plugin is ProcessorPlugin & {
+  createStream(mode: 'compress' | 'decompress', context?: StreamPluginContext): Duplex;
+};
+function getPluginCapabilities(plugin: ProcessorPlugin): Readonly<PluginCapabilities>;
+function supportsOperation(plugin: ProcessorPlugin, operation: PluginOperation): boolean;
+function supportsReverse(plugin: ProcessorPlugin): plugin is ProcessorPlugin & Required<Pick<ProcessorPlugin, 'reverse'>>;
+function assertReversiblePipeline(plugins: readonly ProcessorPlugin[]): void;
+function assertStreamingPipeline(plugins: readonly ProcessorPlugin[]): void;
+```
+
+`withRetry` invokes a synchronous or asynchronous operation with bounded fixed/exponential backoff, returns its eventual result, and rejects when attempts are exhausted, arguments are invalid, or the request is cancelled. `hasStreamSupport` checks whether a native stream factory exists; `getPluginCapabilities` validates the declared/implemented capabilities and returns an immutable description. `supportsOperation` tests a validated operation and rejects unknown operation names. `supportsReverse` is a type guard. Both assertion helpers return `void` on a valid plugin list and throw `UnsupportedReverseError` or `UnsupportedStreamingError` respectively if an operation is unsupported.
+
+### Data conversion and manifests
+
+```ts
+function detectType(input: unknown): string;
+function toBuffer(input: unknown): Buffer;
+function assertOriginalType(value: unknown): asserts value is string;
+function fromBuffer(buffer: Buffer, targetType: string, maxFrameBytes?: number): unknown;
+function makeContext(
+  requestId: string,
+  extra?: Record<string, unknown>,
+  logger?: Logger,
+  span?: Span,
+  signal?: AbortSignal,
+  limits?: Readonly<EngineLimits>,
+): ProcessorContext;
+function buildManifest(plugins: readonly ProcessorPlugin[]): PipeXManifest;
+function isManifest(value: unknown): value is PipeXManifest;
+```
+
+`detectType` classifies inputs (`buffer`, `array`, `object`, and primitive types); `toBuffer` converts a value to a Buffer, using MessagePack for non-null objects. `assertOriginalType` validates a supported decoding type and throws otherwise. `fromBuffer` decodes a Buffer according to a **trusted** target type, rejecting malformed serialized values, incorrect types, or frame limit violations. `makeContext` creates a request-scoped processing context with timestamp and provided integrations. `buildManifest` builds a versioned manifest containing plugin name/version identifiers; `isManifest` tests its structure, not its authenticity.
+
+### Streaming constructors and adapters
+
+```ts
+function buildManifestHeaderTransform(manifest: PipeXManifest): Transform;
+function buildManifestExtractTransform(onManifest: (manifest: PipeXManifest) => void): Transform;
+class GuardedUnpackrStream extends UnpackrStream {
+  constructor(options?: Record<string, unknown>, maxInputBytes?: number);
+}
+function createPackrStream(): PackrStream;
+function createUnpackrStream(maxInputBytes?: number): GuardedUnpackrStream;
+function buildByteLimitTransform(maxBytes: number, label: string): Transform;
+function buildObjectLimitTransform(maxFrames: number): Transform;
+function assertKnownValueByteLimit(value: unknown, maxBytes: number, label: string): void;
+function buildKnownValueByteLimitTransform(maxBytes: number, label: string): Transform;
+function buildFallbackTransform(
+  plugin: ProcessorPlugin,
+  reverse: boolean,
+  emitProgress?: (bytes: number) => void,
+  logger?: Logger,
+  tracer?: Tracer,
+  dlq?: Writable,
+  streamContext?: StreamPluginContext,
+): Transform;
+function buildNdjsonTransform(): Transform;
+function buildTransformChain(
+  plugins: readonly ProcessorPlugin[],
+  mode: 'compress' | 'decompress',
+  reverse?: boolean,
+  onProgress?: (bytes: number) => void,
+  logger?: Logger,
+  tracer?: Tracer,
+  dlq?: Writable,
+  streamContext?: StreamPluginContext,
+): (Duplex | Transform | PackrStream | GuardedUnpackrStream)[];
+function runPipeline(
+  source: Readable,
+  transforms: (Duplex | Transform | PackrStream | GuardedUnpackrStream)[],
+  destination: Writable,
+  options?: { signal?: AbortSignal },
+): Promise<void>;
+```
+
+`buildManifestHeaderTransform` prepends a manifest to a byte stream; `buildManifestExtractTransform` removes and validates an initial manifest frame and invokes `onManifest`. `GuardedUnpackrStream` and `createUnpackrStream` apply an input-byte budget to MessagePack decoding; `createPackrStream` produces a serialization stream. The byte/object limit builders pass through accepted data and emit an error when totals exceed configured bounds. `assertKnownValueByteLimit` checks the byte length of supported, directly measurable values; it returns `void` or throws. `buildKnownValueByteLimitTransform` applies that check per stream value.
+
+`buildFallbackTransform` executes a plugin **per chunk**, using the optional failure sink and telemetry hooks; it must not be used for transforms requiring complete-message semantics. `buildNdjsonTransform` serializes incoming objects as newline-delimited JSON. `buildTransformChain` creates the ordered chain, preferring native plugin streams and rejecting unsupported operations. `runPipeline` awaits Node.js pipeline completion, returning `Promise<void>` and rejecting source, transform, destination, or abort errors.
+
+### MessagePack frame guards
+
+```ts
+function assertMessagePackFrameLimits(
+  input: Buffer | Uint8Array,
+  maxFrameBytes: number,
+  maxFrames?: number,
+): number;
+function buildFrameLimitTransform(maxFrameBytes: number, maxFrames: number): Transform;
+```
+
+The assertion scans MessagePack without fully deserializing it, enforces frame length/count budgets, and returns the number of valid frames. It throws on malformed or oversized encodings. The transform performs equivalent incremental checks across stream chunks and emits errors on incomplete or invalid frames.
+
+### Filesystem path helpers
+
+```ts
+function assertExists(inputPath: string, allowedRoot?: string): string;
+function resolveOutputPath(outputPath: string, allowedRoot?: string): string;
+```
+
+`assertExists` returns the canonical path of an existing input beneath an allowed root and throws if missing or outside that root. `resolveOutputPath` returns a canonicalized candidate destination path after root/parent checks; it rejects unsafe paths and missing parents. **These path-only utilities are not a substitute for the native handle-based safety boundary of `engine.file`.**
+
+### Exported constants and codecs
+
+| Export | Type / value | Meaning |
+| --- | --- | --- |
+| `PIPEX_MANIFEST_KEY` | `'__pipex_v'` | Versioned manifest property |
+| `PACKR` | `Packr` instance | Preconfigured MessagePack writer |
+| `UNPACKR` | `Unpackr` instance | Preconfigured MessagePack reader |
+| `MAX_FRAME_BYTES` | `256 * 1024 * 1024` | Deprecated legacy constant; use `DEFAULT_LIMITS.maxFrameBytes` |
+| `DEFAULT_HIGH_WATER` | `64 * 1024` | High-water size constant |
+| `DEFAULT_LIMITS` | `Readonly<EngineLimits>` | Frozen default operation and resource limits |
+| `ORIGINAL_TYPES` | Frozen readonly string tuple | Supported original-type identifiers |
+
+Codecs expose their underlying `msgpackr` methods and errors rather than the controller's checked operation contract. Prefer `binary.pack`/`binary.unpack` when enforcing PipeX bounds.
+
+### KMS capability helpers
+
+```ts
+function getKmsProviderCapabilities(provider: KmsProvider): Readonly<KmsProviderCapabilities>;
+function supportsKmsOperation(provider: KmsProvider, operation: KmsOperation): boolean;
+```
+
+The first returns validated provider capabilities. The second returns whether the specified operation is supported. Both reject invalid provider definitions; the second also rejects unknown operation names.
 
 ## Error classes and failure behavior
 
