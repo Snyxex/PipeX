@@ -55,10 +55,7 @@ a public environment variable, shell history or Jenkins logs.
    protected `main`, and who can access the isolated agent. Jenkins
    credential masking alone does not isolate credentials from other
    same-user processes on the agent.
-5. Complete the separate **read-only** `Jenkinsfile.release-check`
-   pipeline on the exact final `main` commit. That independent job
-   must pass all tests, audit and Gitleaks checks and produce the
-   reviewed archive `snyxex-pipex-1.0.2.tgz` and SHA-256.
+5. Complete the separate **read-only** `Jenkinsfile.release-check` pipeline before the initial release. The protected publisher independently re-runs security and quality checks, builds the release tarball from the current protected `main` commit and records its SHA-256.
 
 ## Run publisher only after release approval
 
@@ -66,18 +63,11 @@ In the protected Jenkins publishing job, use **Build with Parameters**:
 
 | Parameter | Value |
 | --- | --- |
-| `EXPECTED_COMMIT` | Full 40-character SHA from the approved successful release-check on `main` |
-| `EXPECTED_SHA256` | Exact 64-character SHA-256 of the inspected tarball |
 | `CONFIRM_RELEASE` | `PUBLISH @snyxex/pipex@1.0.2` |
 
-The protected job verifies the current checked-out main SHA and npm
-registry version, runs a full Git-history Gitleaks scan, builds and
-audits the package, checks a clean consumer, and requires the **newly
-built tarball** to have the **identical SHA-256** to the reviewed release
-candidate. If the builds are not reproducible, it must stop for
-investigation; never disable or replace the checksum gate.
+The protected job checks out the current protected `main` commit and npm registry version, runs full-history Gitleaks, builds and tests the code, audits dependencies and installs the packed tarball in a clean consumer. It calculates and archives the new tarball's SHA-256, and verifies that checksum again immediately before publication. **No commit SHA or checksum needs to be manually entered.** Review the archived artifact, commit and package metadata before approving the in-pipeline publish prompt.
 
-A second **interactive Jenkins approval** is then required. Only after
+A **manual interactive Jenkins approval** is then required. Only after
 approval is the Jenkins Secret text credential bound. The pipeline
 writes a temporary private npmrc outside the repository, checks the
 tarball SHA again and calls `npm publish` for that tarball.
