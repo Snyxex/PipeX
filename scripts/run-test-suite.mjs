@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { readdir, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 
 const inputs = [];
 let timeout = 15_000;
@@ -35,16 +35,29 @@ async function discover(input) {
 const files = [...new Set((await Promise.all(inputs.map(discover))).flat())].sort();
 if (files.length === 0) throw new Error(`No *${suffix} files found in: ${inputs.join(', ')}`);
 
+const reportDir = process.env.PIPEX_JUNIT_DIR;
+const reportFile = reportDir ? join(resolve(reportDir), `${basename(inputs[0]).replace(/[^a-z0-9_-]/gi, '-')}.xml`) : undefined;
+if (reportFile) await mkdir(resolve(reportDir), { recursive: true });
+
 const result = spawnSync(process.execPath, [
   '--test',
   `--test-concurrency=${concurrency}`,
   `--test-timeout=${timeout}`,
+  ...(reportFile ? ['--test-reporter=spec', '--test-reporter=junit', '--test-reporter-destination=stdout', `--test-reporter-destination=${reportFile}`] : []),
   ...files,
 ], {
   stdio: 'inherit',
   windowsHide: true,
 });
 
+// Publish only bounded, redacted diagnostics; full output remains in Jenkins.
+if (reportFile) {
+  let xml = await readFile(reportFile, 'utf8');
+  xml = xml.replace(/<failure\b[^>]*>[\s\S]*?<\/failure>/g, '<failure message="Test failed; see Jenkins for sanitized diagnostic context" />');
+  xml = xml.replace(/<failure\b[^>]*\/>/g, '<failure message="Test failed; see Jenkins for sanitized diagnostic context" />');
+  xml = xml.replace(/<system-(?:out|err)\b[^>]*>[\s\S]*?<\/system-(?:out|err)>/g, '');
+  await writeFile(reportFile, xml);
+}
 if (result.error) throw result.error;
 if (result.signal) console.error(`Test runner terminated by signal ${result.signal}`);
 process.exitCode = result.status ?? 1;
