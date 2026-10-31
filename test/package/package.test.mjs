@@ -5,73 +5,80 @@ import { test } from 'node:test';
 
 const manifest = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
 const lockfile = JSON.parse(await readFile(new URL('../../package-lock.json', import.meta.url), 'utf8'));
+const paths = ['.', './compression', './encryption', './hashing', './validation', './parallel', './native', './plugins/kms'];
 
-test('package metadata, lockfile root, and built export targets agree', async () => {
-  const lockedRoot = lockfile.packages[''];
-  assert.equal(lockedRoot.name, manifest.name);
-  assert.equal(lockedRoot.version, manifest.version);
-  assert.deepEqual(lockedRoot.dependencies, manifest.dependencies);
-  assert.deepEqual(lockedRoot.devDependencies, manifest.devDependencies);
-  assert.deepEqual(lockedRoot.engines, manifest.engines);
-  assert.equal(manifest.main, manifest.exports['.'].import);
-  assert.equal(manifest.types, manifest.exports['.'].types);
+test('package metadata, lockfile root, and dual ESM/CJS export targets agree', async () => {
+  const root = lockfile.packages[''];
+  assert.equal(root.name, manifest.name);
+  assert.equal(root.version, manifest.version);
+  assert.deepEqual(root.dependencies, manifest.dependencies);
+  assert.deepEqual(root.devDependencies, manifest.devDependencies);
+  assert.deepEqual(root.engines, manifest.engines);
+  assert.equal(manifest.main, manifest.exports['.'].require.default);
+  assert.equal(manifest.module, manifest.exports['.'].import.default);
+  assert.equal(manifest.types, manifest.exports['.'].import.types);
   assert.equal(manifest.scripts.prepare, 'npm run build');
   assert.equal(manifest.repository.url, 'git+https://github.com/Snyxex/PipeX.git');
   assert.equal(manifest.bugs.url, 'https://github.com/Snyxex/PipeX/issues');
-  assert.deepEqual(manifest.files, ["dist","LICENSE","README.md","CHANGELOG.md","SECURITY.md","docs/architecture.md","docs/encryption-v4-migration.md","docs/enterprise.md"]);
-  assert.ok(manifest.devDependencies.tsdown, 'Git installs need the build tool as a dev dependency');
-  assert.ok(manifest.devDependencies.typescript, 'Git installs need TypeScript for declarations');
-
+  assert.deepEqual(manifest.files, ['dist', 'README.md', 'LICENSE', 'CHANGELOG.md']);
+  assert.ok(manifest.devDependencies.tsdown);
+  assert.ok(manifest.devDependencies.typescript);
+  assert.deepEqual(Object.keys(manifest.exports), paths);
   for (const [subpath, conditions] of Object.entries(manifest.exports)) {
-    assert.deepEqual(Object.keys(conditions).sort(), ['import', 'types']);
-    assert.match(conditions.import, /^\.\/dist\/.+\.mjs$/, `${subpath} must expose an ESM runtime file`);
-    assert.match(conditions.types, /^\.\/dist\/.+\.d\.mts$/, `${subpath} must expose ESM declarations`);
-    await access(new URL(`../../${conditions.import.slice(2)}`, import.meta.url));
-    await access(new URL(`../../${conditions.types.slice(2)}`, import.meta.url));
+    assert.deepEqual(Object.keys(conditions).sort(), ['import', 'require', 'types']);
+    assert.equal(conditions.types, conditions.import.types);
+    assert.match(conditions.import.default, /^\.\/dist\/.+\.mjs$/, subpath);
+    assert.match(conditions.import.types, /^\.\/dist\/.+\.d\.mts$/, subpath);
+    assert.match(conditions.require.default, /^\.\/dist\/.+\.cjs$/, subpath);
+    assert.match(conditions.require.types, /^\.\/dist\/.+\.d\.cts$/, subpath);
+    for (const target of [
+      conditions.import.default, conditions.import.types,
+      conditions.require.default, conditions.require.types,
+    ]) {
+      await access(new URL('../../' + target.slice(2), import.meta.url));
+    }
   }
-
-  const root = await import('@snyxex/pipex');
+  const api = await import('@snyxex/pipex');
   const kms = await import('@snyxex/pipex/plugins/kms');
-  assert.equal(typeof root.DataEngine, 'function');
-  assert.equal(typeof root.getKmsProviderCapabilities, 'function');
-  assert.equal(typeof root.KmsProviderAuthenticationError, 'function');
-  assert.equal(typeof root.KmsProviderUnavailableError, 'function');
-  assert.equal(typeof root.UnsupportedKmsOperationError, 'function');
-  assert.equal(typeof root.WorkerQueueFullError, 'function');
-  assert.equal(typeof root.WorkerPoolCloseError, 'function');
+  assert.equal(typeof api.DataEngine, 'function');
+  assert.equal(typeof api.getKmsProviderCapabilities, 'function');
+  assert.equal(typeof api.KmsProviderAuthenticationError, 'function');
+  assert.equal(typeof api.KmsProviderUnavailableError, 'function');
+  assert.equal(typeof api.UnsupportedKmsOperationError, 'function');
+  assert.equal(typeof api.WorkerQueueFullError, 'function');
+  assert.equal(typeof api.WorkerPoolCloseError, 'function');
   assert.equal(typeof kms.KmsEncryptionPlugin, 'function');
 });
 
-test('dry-run tarball contains only the public release payload', () => {
+test('npm dry-run contains only allowlisted published assets and all export targets', () => {
   const npmCli = process.env.npm_execpath;
-  assert.ok(npmCli, 'npm_execpath is required; run this check through npm');
+  assert.ok(npmCli, 'npm_execpath is required; run through npm');
   const output = execFileSync(process.execPath, [
-    npmCli,
-    'pack',
-    '--dry-run',
-    '--json',
-    '--ignore-scripts',
-    '--cache',
-    '.npm',
+    npmCli, 'pack', '--dry-run', '--json', '--ignore-scripts', '--cache', '.npm',
   ], { cwd: new URL('../..', import.meta.url), encoding: 'utf8' });
-  // npm may print lifecycle/build output before the machine-readable pack JSON.
-  // Locate the JSON array rather than assuming stdout starts with it.
   const jsonMatch = /^\[\s*\{/m.exec(output);
-  assert.ok(jsonMatch, 'npm pack did not emit a JSON package manifest');
+  assert.ok(jsonMatch, 'npm pack did not emit JSON package metadata');
   const [pack] = JSON.parse(output.slice(jsonMatch.index));
-  const actual = pack.files.map(file => file.path).sort();
-  assert.deepEqual(actual, [
-    'CHANGELOG.md',
-    'LICENSE',
-    'README.md',
-    'SECURITY.md',
-    'dist/index.d.mts',
-    'dist/index.d.mts.map',
-    'dist/index.mjs',
-    'dist/index.mjs.map',
-    'docs/architecture.md',
-    'docs/encryption-v4-migration.md',
-    'docs/enterprise.md',
-    'package.json',
-  ]);
+  const actual = new Set(pack.files.map(file => file.path));
+  for (const name of actual) {
+    assert.ok(
+      name === 'package.json' ||
+      name === 'README.md' ||
+      name === 'LICENSE' ||
+      name === 'CHANGELOG.md' ||
+      name.startsWith('dist/'),
+      'Unexpected file in npm package: ' + name,
+    );
+  }
+  for (const required of ['package.json', 'README.md', 'LICENSE', 'CHANGELOG.md']) {
+    assert.ok(actual.has(required), 'Missing required package file: ' + required);
+  }
+  for (const conditions of Object.values(manifest.exports)) {
+    for (const target of [
+      conditions.import.default, conditions.import.types,
+      conditions.require.default, conditions.require.types,
+    ]) {
+      assert.ok(actual.has(target.slice(2)), 'Export target missing from npm tarball: ' + target);
+    }
+  }
 });
