@@ -74,7 +74,6 @@ if (reportFile) {
     const category = safeCategory(type);
     return '<failure type="sanitized" message="' + category + '. Open the restricted Jenkins log for details." />';
   });
-  xml = xml.replace(/<failure\\b[^>]*\\/>/g, '<failure type="sanitized" message="Test execution failed. Open the restricted Jenkins log for details." />');
   xml = xml.replace(/<system-(?:out|err)\\b[^>]*>[\\s\\S]*?<\\/system-(?:out|err)>/g, '');
   const suiteName = basename(inputs[0]).replace(/[^a-zA-Z0-9_-]/g, '-');
   const testCount = (xml.match(/<testcase\\b/g) ?? []).length;
