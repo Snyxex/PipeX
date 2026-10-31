@@ -14,7 +14,7 @@ PipeX composes compression, authenticated encryption, and HMAC integrity checks 
 npm install @snyxex/pipex
 ```
 
-Requires **Node.js 22 or newer** and ESM. PipeX uses Node.js streams, cryptography, and filesystem facilities; it does not provide a browser build. Jenkins tests Node.js 22, 24, and 26.
+Requires **Node.js 22 or newer** and ESM. PipeX uses Node.js streams, cryptography, and filesystem facilities; it does not provide a browser build. 
 
 ## Quick Start
 
