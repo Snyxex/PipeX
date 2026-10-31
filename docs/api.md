@@ -371,12 +371,12 @@ These classes reject unsupported operations, invalid capabilities, deadlines, ca
 ## Versioning and format compatibility
 
 - The file/stream serialization-only manifest currently uses `__pipex_v: 1`.
-- Encrypted data uses the versioned `PXAE` v4 framed format; legacy v3 decryption is opt-in by configuration after disabling default migration compatibility (`allowLegacyDecrypt: false`).
+- EncryptionPlugin 4 writes the versioned `PXAE` framed format. Its legacy v3 reader is enabled by default for migration and can be disabled with `allowLegacyDecrypt: false`.
 - The worker stream transport uses `PXWK` v1 frames; incompatible historical unframed streams must be migrated by the old application.
 - The KMS envelope uses the `PXKM` format with an explicit legacy migration option.
 - Persisted transformed data requires the same logical plugin order, compatible formats, and the appropriate keys to reverse.
 
-The `PXAE` header has its own wire-format version; the plugin implementation is version 4.0.0. These are separate version values. The presence of a version number does not guarantee that every future release will support every historical format.
+The `PXAE` header uses wire-format version 1, while the encryption plugin implementation is version 4.0.0. These are separate version values. The presence of a version number does not guarantee that every future release will support every historical format.
 
 ## Resource and security guidance
 
