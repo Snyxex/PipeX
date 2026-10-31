@@ -7,6 +7,7 @@ import {
   type DecipherGCM,
 } from 'node:crypto';
 import { Transform, type TransformCallback } from 'node:stream';
+import { AuthenticationError, InvalidKeyError } from '../core/errors.js';
 import { DEFAULT_LIMITS, pluginInputLimit, pluginOutputLimit } from '../core/resourceLimits.js';
 import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
 
@@ -51,6 +52,10 @@ interface ParsedHeader {
   readonly algorithm: EncryptionAlgorithm;
   readonly frameSizeBytes: number;
   readonly salt: Buffer;
+}
+
+function assertEncryptionKey(key: Buffer): void {
+  if (!Buffer.isBuffer(key) || key.length !== 32) throw new InvalidKeyError();
 }
 
 function limitsFor(context?: ProcessorContext | StreamPluginContext): FormatLimits {
@@ -165,6 +170,7 @@ function decryptFrame(
   const nonce = nonceFor(sequence);
   const decipher = createDecipheriv(algorithm, key, nonce, { authTagLength: TAG_LENGTH } as any) as DecipherGCM;
   decipher.setAAD(Buffer.concat([globalHeader, frameHeader]));
+  if (tag.length !== TAG_LENGTH) throw new AuthenticationError();
   decipher.setAuthTag(tag);
   const pending = decipher.update(ciphertext);
   try {
@@ -172,7 +178,7 @@ function decryptFrame(
     return final.length === 0 ? pending : Buffer.concat([pending, final]);
   } catch {
     pending.fill(0);
-    throw new Error('[PipeX] Decryption failed: authentication failed');
+    throw new AuthenticationError();
   } finally {
     nonce.fill(0);
   }
@@ -202,6 +208,7 @@ export function isFramedEncryption(data: Buffer): boolean {
 }
 
 export function encryptBuffer(data: Buffer, options: EncryptionFormatOptions, context?: ProcessorContext): Buffer {
+  assertEncryptionKey(options.key);
   const limits = limitsFor(context);
   if (data.length > limits.maxInputBytes) throw new Error(`[PipeX] Encryption input exceeds ${limits.maxInputBytes} bytes`);
   const frameSizeBytes = resolveFrameSize(options, limits);
@@ -227,12 +234,13 @@ export function encryptBuffer(data: Buffer, options: EncryptionFormatOptions, co
 }
 
 export function decryptBuffer(data: Buffer, options: EncryptionFormatOptions, context?: ProcessorContext): Buffer {
+  assertEncryptionKey(options.key);
   const limits = limitsFor(context);
   if (data.length > limits.maxInputBytes) throw new Error(`[PipeX] Decryption input exceeds ${limits.maxInputBytes} bytes`);
   // Legacy packets always start with algorithm id 1 or 2. Reserve the magic
   // prefix byte so truncated framed packets cannot be misclassified as legacy.
   if (data.length === 0 || (!isFramedEncryption(data) && data.readUInt8(0) !== MAGIC.readUInt8(0))) {
-    if (options.allowLegacyDecrypt === false) throw new Error('[PipeX] Decryption failed: legacy format disabled');
+    if (options.allowLegacyDecrypt !== true) throw new Error('[PipeX] Decryption failed: legacy format disabled');
     return decryptLegacy(data, options.key, limits);
   }
   if (data.length < GLOBAL_HEADER_LENGTH) throw new Error('[PipeX] Decryption failed: incomplete framed header');
@@ -289,6 +297,7 @@ export function decryptBuffer(data: Buffer, options: EncryptionFormatOptions, co
 }
 
 export function createEncryptionStream(options: EncryptionFormatOptions, context?: StreamPluginContext): Transform {
+  assertEncryptionKey(options.key);
   const limits = limitsFor(context);
   const frameSizeBytes = resolveFrameSize(options, limits);
   if (encodedLength(0, frameSizeBytes) > limits.maxOutputBytes) throw new Error(`[PipeX] Encryption output exceeds ${limits.maxOutputBytes} bytes`);
@@ -354,6 +363,7 @@ export function createEncryptionStream(options: EncryptionFormatOptions, context
 }
 
 export function createDecryptionStream(options: EncryptionFormatOptions, context?: StreamPluginContext): Transform {
+  assertEncryptionKey(options.key);
   const limits = limitsFor(context);
   let format: 'unknown' | 'framed' | 'legacy' = 'unknown';
   let totalInput = 0;

@@ -1,5 +1,6 @@
 import type { Transform } from 'node:stream';
 import { BasePlugin } from '../core/plugin.js';
+import { EncryptionError, InvalidKeyError } from '../core/errors.js';
 import type { ProcessorContext, StreamPluginContext } from '../core/types.js';
 import {
   createDecryptionStream,
@@ -14,7 +15,7 @@ export type { EncryptionAlgorithm } from './encryptionFormat.js';
 export interface EncryptionOptions extends EncryptionFormatOptions {
   /** Maximum plaintext bytes in each authenticated frame. Defaults to 64 KiB. */
   frameSizeBytes?: number;
-  /** Temporarily accept the unversioned v3 format while migrating. Defaults to true. */
+  /** Temporarily accept the unversioned v3 format while migrating. Defaults to false. */
   allowLegacyDecrypt?: boolean;
 }
 
@@ -22,7 +23,7 @@ export interface EncryptionOptions extends EncryptionFormatOptions {
  * Authenticated, bounded-memory stream encryption.
  *
  * Version 4 writes the versioned PXAE framed format. The legacy unversioned
- * format remains readable by default for migration, but is never written.
+ * format can be explicitly enabled for migration, but is never written.
  */
 export class EncryptionPlugin extends BasePlugin {
   public readonly name = 'encryption';
@@ -30,18 +31,16 @@ export class EncryptionPlugin extends BasePlugin {
 
   constructor(protected override options: EncryptionOptions) {
     super(options);
-    if (!options || !['aes-256-gcm', 'chacha20-poly1305'].includes(options.algorithm)
-      || !Buffer.isBuffer(options.key) || options.key.length !== 32) {
-      throw new Error('[PipeX] Encryption: invalid algorithm or key');
-    }
+    if (!options || !Buffer.isBuffer(options.key) || options.key.length !== 32) throw new InvalidKeyError();
+    if (!['aes-256-gcm', 'chacha20-poly1305'].includes(options.algorithm)) throw new EncryptionError('[PipeX] Unsupported encryption algorithm');
     if (options.frameSizeBytes !== undefined
       && (!Number.isSafeInteger(options.frameSizeBytes)
         || options.frameSizeBytes < 1
         || options.frameSizeBytes > 0xffff_ffff)) {
-      throw new Error('[PipeX] Encryption frameSizeBytes must be a positive 32-bit integer');
+      throw new EncryptionError('[PipeX] Invalid encryption frame size');
     }
     if (options.allowLegacyDecrypt !== undefined && typeof options.allowLegacyDecrypt !== 'boolean') {
-      throw new Error('[PipeX] Encryption allowLegacyDecrypt must be a boolean');
+      throw new EncryptionError('[PipeX] Invalid legacy decryption setting');
     }
   }
 

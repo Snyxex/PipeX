@@ -2,6 +2,9 @@ export type PipeXErrorCode =
   | 'UNSUPPORTED_REVERSE'
   | 'UNSUPPORTED_STREAMING'
   | 'INVALID_PLUGIN_CAPABILITY'
+  | 'ENCRYPTION_ERROR'
+  | 'INVALID_ENCRYPTION_KEY'
+  | 'ENCRYPTION_AUTHENTICATION_FAILED'
   | 'OPERATION_ABORTED'
   | 'OPERATION_TIMEOUT'
   | 'KMS_PROVIDER_FAILURE'
@@ -156,5 +159,27 @@ export class WorkerTaskError extends PipeXError {
   public override readonly name: string = 'WorkerTaskError';
   constructor(public readonly taskName: string, options?: ErrorOptions) {
     super('WORKER_TASK_FAILURE', `[PipeX] Worker task ${taskName} failed`, options);
+  }
+}
+
+/** Public cryptographic failure categories; never include keys or ciphertext in messages. */
+export class EncryptionError extends PipeXError {
+  public override readonly name: string = 'EncryptionError';
+  constructor(message = '[PipeX] Encryption operation failed') {
+    super('ENCRYPTION_ERROR', message);
+  }
+}
+
+export class InvalidKeyError extends PipeXError {
+  public override readonly name: string = 'InvalidKeyError';
+  constructor() {
+    super('INVALID_ENCRYPTION_KEY', '[PipeX] Encryption key must be a 32-byte Buffer');
+  }
+}
+
+export class AuthenticationError extends PipeXError {
+  public override readonly name: string = 'AuthenticationError';
+  constructor() {
+    super('ENCRYPTION_AUTHENTICATION_FAILED', '[PipeX] Encrypted data authentication failed');
   }
 }
