@@ -330,3 +330,7 @@ The npm package ships minified ESM and CommonJS builds, declaration files for bo
 Run `npm run build && npm run report:bundle-size` to generate an itemized `npm pack --dry-run --json --ignore-scripts` report with aggregate package bytes and an estimated module breakdown. The report excludes external dependency installation sizes; its per-entry figures are based on statically discovered JS chunks, not runtime heap or actual consumer bundler tree-shaking.
 
 The current root import exposes all standard plugins for backward compatibility. For smaller imports, use the already published `@snyxex/pipex/compression`, `@snyxex/pipex/encryption`, and `@snyxex/pipex/hashing` entry points. These entry points share package installation and do **not** eliminate dependencies of the published package. A future major-version split could move worker execution (Piscina), native bindings (Koffi), and schema validation (Zod) into separate opt-in packages; that requires an API and compatibility migration.
+
+## Type-safe transformations
+
+The separate `typedPipeline()` API infers each step's input from the previous output, including asynchronous transforms; its `run()` returns `Promise<Output>`. This is distinct from the `DataEngine` binary plugins. See [TypeScript usage](docs/api.md#type-safe-application-transforms).

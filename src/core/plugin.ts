@@ -10,7 +10,7 @@ export abstract class BasePlugin implements ProcessorPlugin {
     return this.reverse !== BasePlugin.prototype.reverse;
   }
 
-  constructor(protected options: any = {}) {}
+  constructor(protected options: object = {}) {}
 
   abstract process(data: Buffer, context: ProcessorContext): Promise<Buffer> | Buffer;
 

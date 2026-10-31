@@ -7,17 +7,30 @@ import {
   createEncryptionStream,
   decryptBuffer,
   encryptBuffer,
-  type EncryptionFormatOptions,
 } from './encryptionFormat.js';
 
 export type { EncryptionAlgorithm } from './encryptionFormat.js';
 
-export interface EncryptionOptions extends EncryptionFormatOptions {
-  /** Maximum plaintext bytes in each authenticated frame. Defaults to 64 KiB. */
-  frameSizeBytes?: number;
-  /** Temporarily accept the unversioned v3 format while migrating. Defaults to false. */
-  allowLegacyDecrypt?: boolean;
+/** Shared authenticated-encryption settings. */
+export interface EncryptionCommonOptions {
+  /** Secret 32-byte encryption key; length is enforced at runtime. */
+  readonly key: Buffer;
+  /** Maximum plaintext bytes per authenticated frame (default 64 KiB). */
+  readonly frameSizeBytes?: number;
+  /** Allow reading old records only during an explicit migration. */
+  readonly allowLegacyDecrypt?: boolean;
 }
+/** AES-256-GCM configuration. */
+export interface Aes256GcmOptions extends EncryptionCommonOptions {
+  readonly algorithm: 'aes-256-gcm';
+}
+/** ChaCha20-Poly1305 configuration. */
+export interface ChaCha20Poly1305Options extends EncryptionCommonOptions {
+  readonly algorithm: 'chacha20-poly1305';
+}
+/** Algorithm-discriminated encryption settings. */
+export type EncryptionOptions = Aes256GcmOptions | ChaCha20Poly1305Options;
+
 
 /**
  * Authenticated, bounded-memory stream encryption.

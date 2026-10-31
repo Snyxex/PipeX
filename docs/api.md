@@ -408,3 +408,21 @@ try {
   else throw error;
 }
 ```
+
+## Type-safe application transforms
+
+Use `typedPipeline` when your transformations change TypeScript types. This is an application-level API, distinct from `DataEngine` plugins, which process binary `Buffer` values. Each `.pipe()` derives its parameter type from the previous step's output and the final `run()` returns `Promise<Output>`.
+
+```ts
+import { typedPipeline } from '@snyxex/pipex';
+
+const pipeline = typedPipeline((input: string) => input.trim())
+  .pipe(async text => ({ text, length: text.length }))
+  .pipe(record => record.length);
+// TypeScript infers Promise<number>; invalid input types fail compilation.
+const length = await pipeline.run('  example  ', { signal: controller.signal });
+```
+
+`CompressionOptions` is discriminated by `type`, so `{type: 'none', level: 5}` is a type error. `EncryptionOptions` and `HashingOptions` are discriminated by `algorithm`. Numeric level bounds and encryption key lengths still require runtime validation.
+
+Run `npm run typecheck` for production and negative compilation type tests, and `npm run test:consumer:built` to verify the packed ESM/CJS declarations.

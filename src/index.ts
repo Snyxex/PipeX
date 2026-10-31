@@ -32,6 +32,8 @@ export type {
 export { isManifest }        from './core/types.js';
 
 export { BasePlugin } from './core/plugin.js';
+export { typedPipeline, TypedPipeline } from './core/typedPipeline.js';
+export type { TypedTransform, TypedPipelineOptions } from './core/typedPipeline.js';
 export {
   KmsProviderError,
   KmsAuthenticationError,
