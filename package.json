@@ -32,6 +32,10 @@
     "prepublishOnly": "npm test",
     "release:preflight": "node scripts/release-preflight.mjs",
     "test:dual-package": "node scripts/verify-dual-package.mjs",
+    "lint:ci": "node scripts/lint-ci.mjs",
+    "typecheck:ci": "tsc -p tsconfig.ci-types.json --noEmit",
+    "test:vitest": "vitest run",
+    "coverage:vitest": "vitest run --coverage",
     "test:examples": "node scripts/verify-examples.mjs"
   },
   "keywords": [
