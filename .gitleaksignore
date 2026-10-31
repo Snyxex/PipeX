@@ -1,0 +1,7 @@
+# Reviewed historical Gitleaks false positives: constant HMAC test fixture '0123456789abcdef'.
+# These four fingerprints match only the identified historical commit/path/rule/line.
+# Do not add broad path or rule exclusions; investigate all new findings.
+db0f5fced3601ef568999fe3d6a9f02f16667593:test/security/resource-limits.test.mjs:generic-api-key:169
+a73eec307b2bb529f124016b76dae26ddbfe9648:test/unit/plugins.test.mjs:generic-api-key:20
+24ac74ca3c86c70b999b013d45bd854071fbe2f5:test/hardening.test.mjs:generic-api-key:53
+ddba6a5a3633ef8fe72b90150b076bf3b52a1916:test/unit/plugins.test.mjs:generic-api-key:35
