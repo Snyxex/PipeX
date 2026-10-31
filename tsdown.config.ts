@@ -15,6 +15,7 @@ export default defineConfig({
   outDir: './dist',
   format: ['esm', 'cjs'],
   dts: true,
-  sourcemap: true,
+  // Keep runtime bundles and both declaration formats, but omit large dev-only maps.
+  sourcemap: false,
   clean: true,
 });

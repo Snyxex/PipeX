@@ -31,7 +31,8 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm test",
     "release:preflight": "node scripts/release-preflight.mjs",
-    "test:dual-package": "node scripts/verify-dual-package.mjs"
+    "test:dual-package": "node scripts/verify-dual-package.mjs",
+    "report:bundle-size": "node scripts/report-bundle-size.mjs"
   },
   "keywords": [
     "data-transformation",
@@ -156,7 +157,10 @@
     }
   },
   "files": [
-    "dist",
+    "dist/*.mjs",
+    "dist/*.cjs",
+    "dist/*.d.mts",
+    "dist/*.d.cts",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
