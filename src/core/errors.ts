@@ -67,7 +67,7 @@ export class UnsupportedAlgorithmError extends PipeXError {
 export class PipelineAbortedError extends PipeXError {
   override readonly name: string = 'PipelineAbortedError';
   constructor(options?: ErrorOptions & { transformName?: string; stage?: string }) {
-    super(options);
+    super('OPERATION_ABORTED', '[PipeX] Operation aborted', options);
   }
 }
 
@@ -114,7 +114,7 @@ export class InvalidPluginCapabilityError extends PipeXError {
 export class OperationAbortedError extends PipelineAbortedError {
   public override readonly name: string = 'OperationAbortedError';
   constructor(options?: ErrorOptions) {
-    super('OPERATION_ABORTED', '[PipeX] Operation aborted', options);
+    super(options);
   }
 }
 
