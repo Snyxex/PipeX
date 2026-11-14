@@ -49,7 +49,7 @@ pipeline {
 
     stage('Validate AI skills') {
       steps {
-        sh 'mise exec node@24 -- node scripts/validate-ai-skills.mjs'
+        sh 'mise exec node@26 -- node scripts/validate-ai-skills.mjs'
       }
     }
 
@@ -132,7 +132,7 @@ pipeline {
 
     stage('Dependency audit') {
       steps {
-        sh 'mise exec node@24 -- npm audit --audit-level=high'
+        sh 'mise exec node@26 -- npm audit --audit-level=high'
       }
     }
 
@@ -150,7 +150,7 @@ pipeline {
           esac
           test "${#REF}" -eq 40
           export PIPEX_GITHUB_INSTALL_SPEC="github:Snyxex/PipeX#$REF"
-          mise exec node@24 -- npm run test:consumer:github
+          mise exec node@26 -- npm run test:consumer:github
         '''
       }
     }
@@ -160,10 +160,10 @@ pipeline {
         sh '''
           set -eu
           mkdir -p .artifacts
-          mise exec node@24 -- npm pack --ignore-scripts --pack-destination .artifacts
+          mise exec node@26 -- npm pack --ignore-scripts --pack-destination .artifacts
           test -f dist/index.mjs
           test -f dist/index.d.mts
-          mise exec node@24 -- npm exec -- node scripts/verify-packed-consumer.mjs
+          mise exec node@26 -- npm exec -- node scripts/verify-packed-consumer.mjs
         '''
         archiveArtifacts artifacts: '.artifacts/*.tgz,dist/**', fingerprint: true
       }
